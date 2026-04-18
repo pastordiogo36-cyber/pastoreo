@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Pastoreo</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    :root {
+      --rojo: #c0392b;
+      --rojo-oscuro: #922b21;
+      --rojo-claro: #e74c3c;
+      --dorado: #f39c12;
+      --negro: #0d0d0d;
+      --gris-oscuro: #1a1a1a;
+      --gris-medio: #2d2d2d;
+      --gris-claro: #4a4a4a;
+      --blanco: #fafafa;
+      --blanco-suave: #f0ece6;
+      --texto-suave: #b0a090;
+      --sombra: 0 8px 32px rgba(0,0,0,0.4);
+      --radio: 16px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--negro);
+      color: var(--blanco);
+      min-height: 100vh;
+      max-width: 480px;
+      margin: 0 auto;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* ===== PANTALLA DE LOGIN ===== */
+    .login-screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+      background: radial-gradient(ellipse at 50% 20%, #3d0f0f 0%, var(--negro) 65%);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .login-screen::before {
+      content: '';
+      position: absolute;
+      top: -100px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 300px;
+      height: 300px;
+      background: radial-gradient(circle, rgba(192,57,43,0.15) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .logo-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 48px;
+      animation: fadeInDown 0.8s ease;
+    }
+
+    .logo-img {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 3px solid var(--rojo);
+      box-shadow: 0 0 40px rgba(192,57,43,0.4);
+      margin-bottom: 20px;
+    }
+
+    .logo-placeholder {
+      width: 110px;
+      height: 110px;
+      border-radius: 50%;
+      background: var(--rojo);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+      box-shadow: 0 0 40px rgba(192,57,43,0.4);
+      margin-bottom: 20px;
+    }
+
+    .app-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 38px;
+      font-weight: 900;
+      letter-spacing: -1px;
+      color: var(--blanco);
+    }
+
+    .app-subtitle {
+      font-size: 13px;
+      color: var(--texto-suave);
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    .login-card {
+      background: var(--gris-oscuro);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radio);
+      padding: 32px 28px;
+      width: 100%;
+      animation: fadeInUp 0.8s ease 0.2s both;
+    }
+
+    .login-card h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 22px;
+      margin-bottom: 8px;
+    }
+
+    .login-card p {
+      color: var(--texto-suave);
+      font-size: 14px;
+      margin-bottom: 28px;
+    }
+
+    .input-group {
+      margin-bottom: 16px;
+    }
+
+    .input-group label {
+      display: block;
+      font-size: 12px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--texto-suave);
+      margin-bottom: 8px;
+    }
+
+    .input-group input {
+      width: 100%;
+      background: var(--gris-medio);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 14px 16px;
+      color: var(--blanco);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .input-group input:focus {
+      border-color: var(--rojo);
+    }
+
+    .btn-primary {
+      width: 100%;
+      background: var(--rojo);
+      color: white;
+      border: none;
+      border-radius: 10px;
+      padding: 16px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+      transition: background 0.2s, transform 0.1s;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-primary:hover { background: var(--rojo-claro); }
+    .btn-primary:active { transform: scale(0.98); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .error-msg {
+      background: rgba(192,57,43,0.15);
+      border: 1px solid rgba(192,57,43,0.3);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 13px;
+      color: #e74c3c;
+      margin-top: 12px;
+    }
+
+    /* ===== HEADER PRINCIPAL ===== */
+    .app-header {
+      background: var(--gris-oscuro);
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .header-logo {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      object-fit: cover;
+      border: 2px solid var(--rojo);
+    }
+
+    .header-title {
+      font-family: 'Playfair Display', serif;
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .rol-badge {
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+
+    .rol-pastor { background: rgba(192,57,43,0.2); color: var(--rojo-claro); border: 1px solid rgba(192,57,43,0.3); }
+    .rol-hory { background: rgba(243,156,18,0.2); color: var(--dorado); border: 1px solid rgba(243,156,18,0.3); }
+    .rol-nangareko { background: rgba(39,174,96,0.2); color: #2ecc71; border: 1px solid rgba(39,174,96,0.3); }
+    .rol-lider_dc { background: rgba(52,152,219,0.2); color: #3498db; border: 1px solid rgba(52,152,219,0.3); }
+
+    .btn-logout {
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.1);
+      color: var(--texto-suave);
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 13px;
+      cursor: pointer;
+      font-family: 'DM Sans', sans-serif;
+      transition: all 0.2s;
+    }
+    .btn-logout:hover { border-color: var(--rojo); color: var(--rojo-claro); }
+
+    /* ===== CONTENIDO PRINCIPAL ===== */
+    .main-content {
+      padding: 20px 20px 100px;
+    }
+
+    .welcome-banner {
+      background: linear-gradient(135deg, var(--rojo-oscuro), var(--gris-medio));
+      border-radius: var(--radio);
+      padding: 24px;
+      margin-bottom: 24px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .welcome-banner::after {
+      content: '✝';
+      position: absolute;
+      right: 20px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 60px;
+      opacity: 0.08;
+    }
+
+    .welcome-banner h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 22px;
+      margin-bottom: 6px;
+    }
+
+    .welcome-banner p {
+      color: rgba(255,255,255,0.7);
+      font-size: 14px;
+    }
+
+    /* ===== CARDS DE MENÚ ===== */
+    .menu-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .menu-card {
+      background: var(--gris-oscuro);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radio);
+      padding: 20px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .menu-card:hover {
+      border-color: var(--rojo);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(192,57,43,0.2);
+    }
+
+    .menu-card .icon {
+      font-size: 32px;
+    }
+
+    .menu-card .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+
+    .menu-card .card-desc {
+      font-size: 11px;
+      color: var(--texto-suave);
+      line-height: 1.4;
+    }
+
+    .menu-card-full {
+      grid-column: 1 / -1;
+    }
+
+    /* ===== SECCIÓN INFO ===== */
+    .info-section {
+      background: var(--gris-oscuro);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radio);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .info-section h3 {
+      font-size: 13px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--texto-suave);
+      margin-bottom: 16px;
+    }
+
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      font-size: 14px;
+    }
+
+    .info-row:last-child { border-bottom: none; }
+    .info-row .label { color: var(--texto-suave); }
+    .info-row .value { font-weight: 500; }
+
+    /* ===== PANTALLA DE SETUP ===== */
+    .setup-screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 24px;
+      background: radial-gradient(ellipse at 50% 20%, #1a0a00 0%, var(--negro) 65%);
+      text-align: center;
+    }
+
+    .setup-screen .icon { font-size: 64px; margin-bottom: 24px; }
+    .setup-screen h2 {
+      font-family: 'Playfair Display', serif;
+      font-size: 26px;
+      margin-bottom: 12px;
+    }
+    .setup-screen p {
+      color: var(--texto-suave);
+      font-size: 14px;
+      line-height: 1.7;
+      margin-bottom: 32px;
+    }
+
+    .setup-form {
+      width: 100%;
+      background: var(--gris-oscuro);
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: var(--radio);
+      padding: 28px;
+    }
+
+    .select-input {
+      width: 100%;
+      background: var(--gris-medio);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 10px;
+      padding: 14px 16px;
+      color: var(--blanco);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 15px;
+      outline: none;
+      margin-bottom: 16px;
+      appearance: none;
+    }
+
+    /* ===== LOADING ===== */
+    .loading-screen {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+    }
+
+    .spinner {
+      width: 48px;
+      height: 48px;
+      border: 3px solid rgba(192,57,43,0.2);
+      border-top-color: var(--rojo);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    /* ===== ANIMACIONES ===== */
+    @keyframes fadeInDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeInUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ===== PRÓXIMAMENTE ===== */
+    .coming-soon {
+      text-align: center;
+      padding: 48px 24px;
+      color: var(--texto-suave);
+    }
+    .coming-soon .big-icon { font-size: 56px; margin-bottom: 16px; }
+    .coming-soon h3 { font-family: 'Playfair Display', serif; font-size: 20px; color: var(--blanco); margin-bottom: 8px; }
+    .coming-soon p { font-size: 14px; line-height: 1.6; }
+
+    .tag-etapa {
+      display: inline-block;
+      background: rgba(192,57,43,0.15);
+      border: 1px solid rgba(192,57,43,0.3);
+      color: var(--rojo-claro);
+      font-size: 11px;
+      letter-spacing: 1px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="app"></div>
+
+<script type="module">
+  const { createClient } = supabase;
+
+  // ===== CONFIGURACIÓN - REEMPLAZÁ ESTOS VALORES =====
+  const SUPABASE_URL = 'https://wqojjgfeyyppfdsretid.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indxb2pqZ2ZleXlwcGZkc3JldGlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0Njk3NTUsImV4cCI6MjA5MjA0NTc1NX0.cN5mzaNTyRJuU1Af01QbOX_YIEBkAUGLJ3H-IYfbrMI';
+  // ===================================================
+
+  const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+  // ===== ESTADO GLOBAL =====
+  let state = {
+    loading: true,
+    session: null,
+    usuario: null,
+    pantalla: 'home',
+    error: null,
+  };
+
+  // ===== RENDER PRINCIPAL =====
+  function render() {
+    const app = document.getElementById('app');
+    if (state.loading) {
+      app.innerHTML = renderLoading();
+      return;
+    }
+    if (!state.session) {
+      app.innerHTML = renderLogin();
+      bindLogin();
+      return;
+    }
+    if (!state.usuario) {
+      app.innerHTML = renderSetupPerfil();
+      bindSetup();
+      return;
+    }
+    app.innerHTML = renderApp();
+    bindApp();
+  }
+
+  // ===== PANTALLA LOADING =====
+  function renderLoading() {
+    return `
+      <div class="loading-screen">
+        <div class="spinner"></div>
+        <p style="color: var(--texto-suave); font-size: 14px;">Cargando Pastoreo...</p>
+      </div>`;
+  }
+
+  // ===== PANTALLA LOGIN =====
+  function renderLogin() {
+    return `
+      <div class="login-screen">
+        <div class="logo-container">
+          <div class="logo-placeholder">🔥</div>
+          <div class="app-title">Pastoreo</div>
+          <div class="app-subtitle">Redención en Avivamiento</div>
+        </div>
+        <div class="login-card">
+          <h2>Bienvenido</h2>
+          <p>Ingresá con tus credenciales de líder</p>
+          <div class="input-group">
+            <label>Email</label>
+            <input type="email" id="email-input" placeholder="tu@email.com" autocomplete="email" />
+          </div>
+          <div class="input-group">
+            <label>Contraseña</label>
+            <input type="password" id="pass-input" placeholder="••••••••" autocomplete="current-password" />
+          </div>
+          <button class="btn-primary" id="btn-login">Ingresar</button>
+          <div id="login-error" style="display:none" class="error-msg"></div>
+        </div>
+      </div>`;
+  }
+
+  function bindLogin() {
+    const btn = document.getElementById('btn-login');
+    const emailInput = document.getElementById('email-input');
+    const passInput = document.getElementById('pass-input');
+    const errorDiv = document.getElementById('login-error');
+
+    async function doLogin() {
+      const email = emailInput.value.trim();
+      const pass = passInput.value;
+      if (!email || !pass) {
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = 'Por favor completá email y contraseña.';
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = 'Ingresando...';
+      errorDiv.style.display = 'none';
+
+      const { data, error } = await sb.auth.signInWithPassword({ email, password: pass });
+      if (error) {
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = 'Email o contraseña incorrectos.';
+        btn.disabled = false;
+        btn.textContent = 'Ingresar';
+      }
+    }
+
+    btn.addEventListener('click', doLogin);
+    passInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  }
+
+  // ===== SETUP DE PERFIL (primera vez) =====
+  function renderSetupPerfil() {
+    return `
+      <div class="setup-screen">
+        <div class="icon">👤</div>
+        <h2>Completá tu perfil</h2>
+        <p>Es tu primera vez ingresando.<br>Completá estos datos para continuar.</p>
+        <div class="setup-form">
+          <div class="input-group">
+            <label>Tu nombre completo</label>
+            <input type="text" id="setup-nombre" placeholder="Nombre y apellido" />
+          </div>
+          <div class="input-group">
+            <label>Tu rol en la iglesia</label>
+            <select id="setup-rol" class="select-input">
+              <option value="">Seleccioná tu rol</option>
+              <option value="pastor">Pastor</option>
+              <option value="hory">Hory (Asistencia)</option>
+              <option value="nangareko">Ñangareko (Cuidador)</option>
+              <option value="lider_dc">Líder DC</option>
+            </select>
+          </div>
+          <button class="btn-primary" id="btn-setup">Guardar y continuar</button>
+          <div id="setup-error" style="display:none" class="error-msg"></div>
+        </div>
+      </div>`;
+  }
+
+  function bindSetup() {
+    document.getElementById('btn-setup').addEventListener('click', async () => {
+      const nombre = document.getElementById('setup-nombre').value.trim();
+      const rol = document.getElementById('setup-rol').value;
+      const errorDiv = document.getElementById('setup-error');
+
+      if (!nombre || !rol) {
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = 'Por favor completá todos los campos.';
+        return;
+      }
+
+      const { error } = await sb.from('usuarios').insert({
+        id: state.session.user.id,
+        nombre,
+        email: state.session.user.email,
+        rol
+      });
+
+      if (error) {
+        errorDiv.style.display = 'block';
+        errorDiv.textContent = 'Error al guardar: ' + error.message;
+        return;
+      }
+
+      await cargarUsuario();
+      render();
+    });
+  }
+
+  // ===== APP PRINCIPAL =====
+  function renderApp() {
+    const u = state.usuario;
+    const rolLabel = { pastor: 'Pastor', hory: 'Hory', nangareko: 'Ñangareko', lider_dc: 'Líder DC' }[u.rol];
+    const rolClass = 'rol-' + u.rol;
+
+    return `
+      <div class="app-header">
+        <div class="header-left">
+          <div style="width:36px;height:36px;border-radius:50%;background:var(--rojo);display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid var(--rojo);">🔥</div>
+          <div>
+            <div class="header-title">Pastoreo</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span class="rol-badge ${rolClass}">${rolLabel}</span>
+          <button class="btn-logout" id="btn-logout">Salir</button>
+        </div>
+      </div>
+
+      <div class="main-content">
+        ${renderBienvenida(u, rolLabel)}
+        ${renderMenuPorRol(u.rol)}
+        ${renderInfoPerfil(u)}
+      </div>`;
+  }
+
+  function renderBienvenida(u, rolLabel) {
+    const hora = new Date().getHours();
+    const saludo = hora < 12 ? 'Buenos días' : hora < 19 ? 'Buenas tardes' : 'Buenas noches';
+    const nombres = u.nombre.split(' ');
+    const primerNombre = nombres[0];
+
+    return `
+      <div class="welcome-banner">
+        <h2>${saludo}, ${primerNombre} 👋</h2>
+        <p>Estás ingresado como <strong>${rolLabel}</strong></p>
+      </div>`;
+  }
+
+  function renderMenuPorRol(rol) {
+    const menus = {
+      pastor: `
+        <div class="menu-grid">
+          <div class="menu-card" onclick="irA('dashboard')">
+            <div class="icon">📊</div>
+            <div class="card-title">Dashboard</div>
+            <div class="card-desc">Estadísticas generales</div>
+          </div>
+          <div class="menu-card" onclick="irA('lideres')">
+            <div class="icon">👥</div>
+            <div class="card-title">Líderes</div>
+            <div class="card-desc">Fichas y seguimiento</div>
+          </div>
+          <div class="menu-card" onclick="irA('congregantes')">
+            <div class="icon">🏛️</div>
+            <div class="card-title">Congregación</div>
+            <div class="card-desc">Ver todos los miembros</div>
+          </div>
+          <div class="menu-card" onclick="irA('alertas')">
+            <div class="icon">🔔</div>
+            <div class="card-title">Alertas</div>
+            <div class="card-desc">Notificaciones del sistema</div>
+          </div>
+          <div class="menu-card menu-card-full" onclick="irA('calendario')">
+            <div class="icon">📅</div>
+            <div class="card-title">Calendario de encuentros</div>
+            <div class="card-desc">Agendá reuniones con tus líderes</div>
+          </div>
+        </div>`,
+
+      hory: `
+        <div class="menu-grid">
+          <div class="menu-card menu-card-full" onclick="irA('asistencia')">
+            <div class="icon">✅</div>
+            <div class="card-title">Tomar asistencia</div>
+            <div class="card-desc">Marcar presentes en el servicio de hoy</div>
+          </div>
+          <div class="menu-card menu-card-full" onclick="irA('nuevo-ingreso')">
+            <div class="icon">➕</div>
+            <div class="card-title">Nuevo ingreso</div>
+            <div class="card-desc">Registrar a alguien que viene por primera vez</div>
+          </div>
+        </div>`,
+
+      nangareko: `
+        <div class="menu-grid">
+          <div class="menu-card menu-card-full" onclick="irA('alerta-nangareko')">
+            <div class="icon">🚨</div>
+            <div class="card-title">Alerta Ñangareko</div>
+            <div class="card-desc">Nuevos sin asignar — hacé clic en "Yo me encargo"</div>
+          </div>
+          <div class="menu-card menu-card-full" onclick="irA('mis-cuidados')">
+            <div class="icon">🤝</div>
+            <div class="card-title">Mis cuidados</div>
+            <div class="card-desc">Personas que estás discipulando</div>
+          </div>
+          <div class="menu-card" onclick="irA('fichas')">
+            <div class="icon">📋</div>
+            <div class="card-title">Fichas</div>
+            <div class="card-desc">Registro de contactos</div>
+          </div>
+          <div class="menu-card" onclick="irA('alertas')">
+            <div class="icon">🔔</div>
+            <div class="card-title">Alertas</div>
+            <div class="card-desc">Recordatorios activos</div>
+          </div>
+        </div>`,
+
+      lider_dc: `
+        <div class="menu-grid">
+          <div class="menu-card menu-card-full" onclick="irA('asistencia-dc')">
+            <div class="icon">✅</div>
+            <div class="card-title">Asistencia del DC</div>
+            <div class="card-desc">Marcar presentes en tu grupo</div>
+          </div>
+          <div class="menu-card menu-card-full" onclick="irA('mi-grupo')">
+            <div class="icon">🏠</div>
+            <div class="card-title">Mi grupo DC</div>
+            <div class="card-desc">Integrantes y fichas de seguimiento</div>
+          </div>
+          <div class="menu-card" onclick="irA('fichas-dc')">
+            <div class="icon">📋</div>
+            <div class="card-title">Fichas</div>
+            <div class="card-desc">Contactos privados</div>
+          </div>
+          <div class="menu-card" onclick="irA('alertas')">
+            <div class="icon">🔔</div>
+            <div class="card-title">Alertas</div>
+            <div class="card-desc">Ausencias y recordatorios</div>
+          </div>
+        </div>`
+    };
+
+    return menus[rol] || '';
+  }
+
+  function renderInfoPerfil(u) {
+    return `
+      <div class="info-section">
+        <h3>Tu perfil</h3>
+        <div class="info-row">
+          <span class="label">Nombre</span>
+          <span class="value">${u.nombre}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Email</span>
+          <span class="value" style="font-size:13px;">${u.email}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">Rol</span>
+          <span class="value">{{ rolLabel }}</span>
+        </div>
+      </div>
+      <div class="coming-soon">
+        <div class="big-icon">🚧</div>
+        <h3>Próximamente</h3>
+        <p>Las funciones de asistencia, fichas y alertas se activan en la siguiente etapa de desarrollo.</p>
+        <div class="tag-etapa">Etapa 2 — En construcción</div>
+      </div>`;
+  }
+
+  function bindApp() {
+    document.getElementById('btn-logout')?.addEventListener('click', async () => {
+      await sb.auth.signOut();
+    });
+  }
+
+  window.irA = function(pantalla) {
+    alert('Esta sección estará disponible en la próxima etapa 🚀\n\nEstás yendo a: ' + pantalla);
+  };
+
+  // ===== CARGAR USUARIO =====
+  async function cargarUsuario() {
+    if (!state.session) return;
+    const { data } = await sb.from('usuarios').select('*').eq('id', state.session.user.id).single();
+    state.usuario = data || null;
+  }
+
+  // ===== INICIALIZACIÓN =====
+  async function init() {
+    const { data: { session } } = await sb.auth.getSession();
+    state.session = session;
+    if (session) await cargarUsuario();
+    state.loading = false;
+    render();
+
+    sb.auth.onAuthStateChange(async (event, session) => {
+      state.session = session;
+      if (session) {
+        await cargarUsuario();
+      } else {
+        state.usuario = null;
+      }
+      render();
+    });
+  }
+
+  init();
+</script>
+</body>
+</html>
