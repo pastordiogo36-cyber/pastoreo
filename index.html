@@ -2561,7 +2561,78 @@
       state.usuario = data || null;
     }
 
+  // ===== REALTIME LISTENER =====
+function setupRealtimeListeners() {
+  // Suscripción a la tabla 'congregantes' para notificar nuevos ingresos
+  sb.channel('alertas-nuevos')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'congregantes' }, async (payload) => {
+      // payload.new contiene el nuevo registro insertado
+      const nuevoCongregante = payload.new;
+
+      // 1. Verificar si el nuevo congregante es un "Nuevo" (estado 'nuevo')
+      //    y si no tiene un ñangareko asignado aún (la alerta no se disparó antes)
+      if (nuevoCongregante.estado === 'nuevo' && !nuevoCongregante.nangareko_id) {
+
+        // 2. Si el usuario actual es un Ñangareko, actualiza su lista de alertas
+        if (state.usuario?.rol === 'nangareko') {
+          // Si el Ñangareko está en la pantalla de inicio o alertas, actualiza el estado y re-renderiza
+          if (state.pantalla === 'home' || state.pantalla === 'nangareko-alertas') {
+            await cargarDatosNangareko();
+            mostrarToast(`🚨 ¡Nuevo ingreso! ${nuevoCongregante.nombre}`);
+            render();
+          }
+        }
+      }
+    })
+    .subscribe();
+}```
+
+3.  **Llama a la nueva función `setupRealtimeListeners()`** dentro de `init()`, después de que el usuario haya iniciado sesión:
+
+```javascript
+// ===== INIT =====
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  state.session = session;
+
+  if (session) {
+    await cargarUsuario();
+    // AÑADE ESTA LÍNEA AQUÍ PARA INICIAR EL LISTENER DE REALTIME
+    setupRealtimeListeners();
+  }
+  
+  state.loading = false;
+  render();
+
+  sb.auth.onAuthStateChange(async (event, session) => {
+    state.session = session;
+    if (session) { await cargarUsuario(); }
+    else { state.usuario = null; }
+    render();
+  });
+}
+
+#### Paso 1: Optimizar el Filtro de Búsqueda con Debounce
+
+Para evitar que se filtre la lista en cada pulsación de tecla, implementa una función `debounce`. Esto retrasa la ejecución del filtro hasta que el usuario deja de escribir por un breve período de tiempo (ej. 300ms).
+
+1.  **Copia el siguiente código** y pégalo al principio de tu script, antes de `const state = { ... }`.
+
+```javascript
+// ===== UTILIDADES =====
+// Función Debounce para limitar la frecuencia de ejecución de una función
+function debounce(fn, delay) {
+  let timeoutId;
+  return function(...args) {
+    clearTimeout(timeoutId);
+    timeoutId = setTimeout(() => {
+      fn.apply(this, args);
+    }, delay);
+  };
+}
+     
     // ===== INIT =====
+    
     async function init() {
       const { data: { session } } = await sb.auth.getSession();
       state.session = session;
