@@ -831,6 +831,7 @@
   <script>
     const { createClient } = supabase;
 
+    // TODO: Reemplaza con tus claves de Supabase si cambian
     const SUPABASE_URL = 'https://wqojjgfeyyppfdsretid.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indxb2pqZ2ZleXlwcGZkc3JldGlkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY0Njk3NTUsImV4cCI6MjA5MjA0NTc1NX0.cN5mzaNTyRJuU1Af01QbOX_YIEBkAUGLJ3H-IYfbrMI';
 
@@ -867,7 +868,11 @@
       liderDCFichas: []
     };
 
-    // ===== TOAST =====
+    // ============================================
+    // UTILITIES
+    // ============================================
+
+    // Toast notifications
     function mostrarToast(msg, tipo = 'ok') {
       const t = document.createElement('div');
       t.className = 'toast' + (tipo === 'error' ? ' error' : '');
@@ -876,7 +881,7 @@
       setTimeout(() => t.remove(), 3000);
     }
 
-    // ===== SANITIZAR (CORREGIDO) =====
+    // Sanitize user input (prevents XSS)
     function sanitizar(texto) {
       if (!texto) return '';
       const div = document.createElement('div');
@@ -884,7 +889,77 @@
       return div.innerHTML;
     }
 
-    // ===== RENDER =====
+    // Debounce function to limit execution frequency (performance optimization)
+    function debounce(fn, delay) {
+      let timeoutId;
+      return function(...args) {
+        clearTimeout(timeoutId);
+        timeoutId = setTimeout(() => {
+          fn.apply(this, args);
+        }, delay);
+      };
+    }
+
+    // ============================================
+    // REALTIME AND AUTHENTICATION
+    // ============================================
+
+    // Supabase Realtime Listener (for Ñangareko new alerts)
+    function setupRealtimeListeners() {
+      // Suscripción a la tabla 'congregantes' para notificar nuevos ingresos
+      sb.channel('alertas-nuevos')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'congregantes' }, async (payload) => {
+          const nuevoCongregante = payload.new;
+
+          // 1. Verificar si el nuevo congregante es un "Nuevo" (estado 'nuevo')
+          //    y si no tiene un ñangareko asignado aún (la alerta no se disparó antes)
+          if (nuevoCongregante.estado === 'nuevo' && !nuevoCongregante.nangareko_id) {
+
+            // 2. Si el usuario actual es un Ñangareko, actualiza su lista de alertas
+            if (state.usuario?.rol === 'nangareko') {
+              // Si el Ñangareko está en la pantalla de inicio o alertas, actualiza el estado y re-renderiza
+              if (state.pantalla === 'home' || state.pantalla === 'nangareko-alertas') {
+                await cargarDatosNangareko();
+                mostrarToast(`🚨 ¡Nuevo ingreso! ${nuevoCongregante.nombre}`);
+                render();
+              }
+            }
+          }
+        })
+        .subscribe();
+    }
+
+    // Load user profile from 'usuarios' table
+    async function cargarUsuario() {
+      if (!state.session) return;
+      const { data } = await sb.from('usuarios').select('*').eq('id', state.session.user.id).single();
+      state.usuario = data || null;
+    }
+
+    // Initial app load function
+    async function init() {
+      const { data: { session } } = await sb.auth.getSession();
+      state.session = session;
+
+      if (session) {
+        await cargarUsuario();
+        setupRealtimeListeners();
+      }
+
+      state.loading = false;
+      render();
+
+      sb.auth.onAuthStateChange(async (event, session) => {
+        state.session = session;
+        if (session) { await cargarUsuario(); } else { state.usuario = null; }
+        render();
+      });
+    }
+
+    // ============================================
+    // SCREEN MANAGEMENT & NAVIGATION
+    // ============================================
+
     function render() {
       const app = document.getElementById('app');
       if (state.loading) { app.innerHTML = renderLoading(); return; }
@@ -899,11 +974,69 @@
       bindApp();
     }
 
+    function renderPantalla() {
+      const rol = state.usuario.rol;
+      if (state.pantalla === 'home') {
+        if (rol === 'hory') return renderHomeHory();
+        if (rol === 'pastor') return renderHomePastor();
+        if (rol === 'nangareko') return renderHomeNangareko();
+        if (rol === 'lider_dc') return renderHomeLiderDC();
+      }
+      if (state.pantalla === 'asistencia') return renderAsistencia();
+      if (state.pantalla === 'nuevo-ingreso') return renderNuevoIngreso();
+      // Pastor sub-pantallas
+      if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
+      if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
+      if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
+      if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
+      if (state.pantalla === 'pastor-grupos') return renderPastorGrupos();
+      // Ñangareko sub-pantallas
+      if (state.pantalla === 'nangareko-alertas') return renderNangarekoAlertas();
+      if (state.pantalla === 'nangareko-cuidados') return renderNangarekoCuidados();
+      if (state.pantalla === 'nangareko-fichas') return renderNangarekoFichas();
+      // Líder DC sub-pantallas
+      if (state.pantalla === 'lider-dc-grupo') return renderLiderDCGrupo();
+      if (state.pantalla === 'lider-dc-asistencia') return renderLiderDCAsistencia();
+      if (state.pantalla === 'lider-dc-fichas') return renderLiderDCFichas();
+      return `<div class="coming-soon"><div class="big-icon">🚧</div><h3>Próximamente</h3><p>Esta sección estará disponible en la siguiente etapa.</p><div class="tag-etapa">En construcción</div></div>`;
+    }
+
+    window.cambiarPantalla = async function (pantalla) {
+      // Si estamos saliendo de la pantalla de asistencia, guardar cambios pendientes
+      if (state.pantalla === 'asistencia' && pantalla !== 'asistencia') {
+        await guardarAsistencias();
+      }
+
+      state.pantalla = pantalla;
+      state.busqueda = '';
+      if (pantalla === 'asistencia') {
+        await cargarCongregantes();
+        await cargarAsistenciasHoy();
+      }
+      if (pantalla === 'home') {
+        if (state.usuario?.rol === 'pastor') await cargarDatosPastor();
+        if (state.usuario?.rol === 'nangareko') await cargarDatosNangareko();
+        if (state.usuario?.rol === 'lider_dc') await cargarDatosLiderDC();
+        if (state.usuario?.rol === 'hory') await cargarStatsHory();
+      }
+      if (pantalla === 'lider-dc-asistencia') {
+        state.asistenciaDCHoy = {};
+      }
+      render();
+    };
+
+    window.irA = function (pantalla) {
+      alert('Esta sección estará disponible próximamente 🚀\n\n→ ' + pantalla);
+    };
+
+    // ============================================
+    // LOGIN AND SETUP SCREENS
+    // ============================================
+
     function renderLoading() {
       return `<div class="loading-screen"><div class="spinner"></div><p style="color:var(--texto-suave);font-size:14px">Cargando Pastoreo...</p></div>`;
     }
 
-    // ===== LOGIN =====
     function renderLogin() {
       return `
       <div class="login-screen">
@@ -938,7 +1071,6 @@
       document.getElementById('pass-input').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
     }
 
-    // ===== SETUP =====
     function renderSetup() {
       return `
       <div class="setup-screen">
@@ -974,7 +1106,10 @@
       });
     }
 
-    // ===== HEADER =====
+    // ============================================
+    // HEADER & COMMON UI
+    // ============================================
+
     function renderHeader() {
       const u = state.usuario;
       const rolLabel = { pastor: 'Pastor', hory: 'Hory', nangareko: 'Ñangareko', lider_dc: 'Líder DC' }[u.rol];
@@ -991,36 +1126,60 @@
       </div>`;
     }
 
-    // ===== PANTALLAS POR ROL =====
-    function renderPantalla() {
-      const rol = state.usuario.rol;
-      if (state.pantalla === 'home') {
-        if (rol === 'hory') return renderHomeHory();
-        if (rol === 'pastor') return renderHomePastor();
-        if (rol === 'nangareko') return renderHomeNangareko();
-        if (rol === 'lider_dc') return renderHomeLiderDC();
+    function bindApp() {
+      document.getElementById('btn-logout')?.addEventListener('click', async () => { await sb.auth.signOut(); });
+
+      const btnGuardar = document.getElementById('btn-guardar-nuevo');
+      if (btnGuardar) {
+        btnGuardar.addEventListener('click', async () => {
+          const nombre = document.getElementById('nuevo-nombre')?.value.trim();
+          const telefono = document.getElementById('nuevo-telefono')?.value.trim();
+          const err = document.getElementById('nuevo-error');
+          const exito = document.getElementById('nuevo-exito');
+          if (!nombre) { err.style.display = 'block'; err.textContent = 'El nombre es obligatorio.'; return; }
+          btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
+          err.style.display = 'none';
+
+          const { data: nuevo, error } = await sb.from('congregantes').insert({
+            nombre, telefono: telefono || null, estado: 'nuevo'
+          }).select().single();
+
+          if (error) {
+            err.style.display = 'block'; err.textContent = 'Error al guardar: ' + error.message;
+            btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
+            return;
+          }
+
+          const { data: nangarekos } = await sb.from('usuarios').select('id').eq('rol', 'nangareko');
+          if (nangarekos && nangarekos.length > 0) {
+            const alertas = nangarekos.map(n => ({
+              usuario_id: n.id,
+              congregante_id: nuevo.id,
+              tipo: 'nuevo_ingreso',
+              mensaje: `${nombre} ingresó por primera vez`
+            }));
+            await sb.from('alertas').insert(alertas);
+          }
+
+          await cargarCongregantes();
+          exito.style.display = 'block';
+          exito.textContent = `✅ ${nombre} registrado correctamente. Se notificó a los Ñangarekos.`;
+          document.getElementById('nuevo-nombre').value = '';
+          document.getElementById('nuevo-telefono').value = '';
+          state.fotoNuevo = null;
+          btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
+          mostrarToast(`✨ ${nombre} registrado!`);
+        });
       }
-      if (state.pantalla === 'asistencia') return renderAsistencia();
-      if (state.pantalla === 'nuevo-ingreso') return renderNuevoIngreso();
-      // Pastor sub-pantallas
-      if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
-      if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
-      if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
-      if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
-      if (state.pantalla === 'pastor-grupos') return renderPastorGrupos();
-      // Ñangareko sub-pantallas
-      if (state.pantalla === 'nangareko-alertas') return renderNangarekoAlertas();
-      if (state.pantalla === 'nangareko-cuidados') return renderNangarekoCuidados();
-      if (state.pantalla === 'nangareko-fichas') return renderNangarekoFichas();
-      // Líder DC sub-pantallas
-      if (state.pantalla === 'lider-dc-grupo') return renderLiderDCGrupo();
-      if (state.pantalla === 'lider-dc-asistencia') return renderLiderDCAsistencia();
-      if (state.pantalla === 'lider-dc-fichas') return renderLiderDCFichas();
-      return `<div class="coming-soon"><div class="big-icon">🚧</div><h3>Próximamente</h3><p>Esta sección estará disponible en la siguiente etapa.</p><div class="tag-etapa">En construcción</div></div>`;
+    }
+
+    function estadoLabel(estado) {
+      const labels = { nuevo: '✨ Nuevo', en_proceso: '🔵 En proceso', en_anua: '📚 En Añua', bautizado: '💧 Bautizado', en_dc: '🏠 En DC', graduado: '🎓 Graduado', visita: '👋 Visita' };
+      return labels[estado] || estado;
     }
 
     // ============================================
-    // SECCIÓN PASTOR (Dashboard + Gestión de Grupos)
+    // SECCIÓN PASTOR
     // ============================================
 
     function renderHomePastor() {
@@ -1168,10 +1327,11 @@
         .order('created_at', { ascending: false });
       state.gruposDC = grupos || [];
 
-      setTimeout(() => dibujarGraficoAsistencia(), 100);
+      // Dibuja el gráfico después de cargar los datos (o usa datos mock si es necesario)
+      // setTimeout(() => dibujarGraficoAsistencia(), 100);
     }
 
-    async function dibujarGraficoAsistencia() {
+    function dibujarGraficoAsistencia() {
       const canvas = document.getElementById('asistenciaChart');
       if (!canvas) return;
 
@@ -1360,7 +1520,7 @@
     }
 
     // ============================================
-    // SECCIÓN ÑANGAREKO (100% funcional)
+    // SECCIÓN ÑANGAREKO
     // ============================================
 
     function renderHomeNangareko() {
@@ -1728,7 +1888,7 @@
     };
 
     // ============================================
-    // SECCIÓN LÍDER DC (NUEVA 100%)
+    // SECCIÓN LÍDER DC
     // ============================================
 
     function renderHomeLiderDC() {
@@ -1976,31 +2136,16 @@
     `;
     }
 
-    window.toggleAsistencia = function (congreganteId, presente) {
-  state.asistenciasHoy[congreganteId] = presente;
+    window.toggleAsistenciaDC = function (congreganteId, presente) {
+      state.asistenciaDCHoy[congreganteId] = presente;
 
-  const item = document.getElementById('item-' + congreganteId);
-  if (item) {
-    if (presente) {
-      item.classList.add('presente');
-    } else {
-      item.classList.remove('presente');
-    }
-  }
-
-  // --- Actualizar stats locales ---
-  const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
-  const statsCards = document.querySelectorAll('.stats-row .stat-card');
-  if (statsCards.length >= 3) {
-    const presentesCard = statsCards[1]?.querySelector('.stat-numero');
-    const ausentesCard = statsCards[2]?.querySelector('.stat-numero');
-    if (presentesCard) presentesCard.textContent = presentes;
-    if (ausentesCard) ausentesCard.textContent = state.congregantes.length - presentes;
-  }
-  
-  // No llamar a render() ni a la base de datos aquí.
-  // La base de datos se actualizará al guardar o al salir de la pantalla.
-};
+      const item = document.getElementById(`dc-item-${congreganteId}`);
+      if (item) {
+        if (presente) {
+          item.classList.add('presente');
+        } else {
+          item.classList.remove('presente');
+        }
       }
 
       const presentes = Object.values(state.asistenciaDCHoy).filter(Boolean).length;
@@ -2177,7 +2322,7 @@
     };
 
     // ============================================
-    // SECCIÓN HORY (100% funcional)
+    // SECCIÓN HORY (Asistencia)
     // ============================================
 
     function renderHomeHory() {
@@ -2271,8 +2416,8 @@
         </div>
       </div>
 
-  <input class="search-input" type="text" placeholder="🔍 Buscar congregante..." 
-    value="${state.busqueda}" oninput="debouncedFiltrarBusqueda(this.value)" />
+      <input class="search-input" type="text" placeholder="🔍 Buscar congregante..." 
+        value="${state.busqueda}" oninput="debouncedFiltrarBusqueda(this.value)" />
 
       <div id="lista-congregantes">
         ${filtrados.length === 0 ?
@@ -2301,11 +2446,6 @@
           }).join('')
         }
       </div>`;
-    }
-
-    function estadoLabel(estado) {
-      const labels = { nuevo: '✨ Nuevo', en_proceso: '🔵 En proceso', en_anua: '📚 En Añua', bautizado: '💧 Bautizado', en_dc: '🏠 En DC', graduado: '🎓 Graduado', visita: '👋 Visita' };
-      return labels[estado] || estado;
     }
 
     function renderNuevoIngreso() {
@@ -2346,27 +2486,29 @@
       </div>`;
     }
 
-    // ===== FUNCIONES GLOBALES =====
     window.cambiarServicio = async function (servicio) {
       state.servicioActivo = servicio;
       await cargarAsistenciasHoy();
 
-      const statsCards = document.querySelectorAll('.stats-row .stat-card');
-      if (statsCards.length >= 3 && document.getElementById('lista-congregantes')) {
-        const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
-        const presentesCard = statsCards[1]?.querySelector('.stat-numero');
-        const ausentesCard = statsCards[2]?.querySelector('.stat-numero');
-        if (presentesCard) presentesCard.textContent = presentes;
-        if (ausentesCard) ausentesCard.textContent = state.congregantes.length - presentes;
+      // Actualizar la lista de congregantes y stats sin re-renderizar todo
+      // Llama a filtrarBusqueda directamente para actualizar la lista de una vez.
+      filtrarBusqueda(state.busqueda); // Re-filtra con los datos de asistencia actualizados.
 
-        document.querySelectorAll('.servicio-btn').forEach(btn => btn.classList.remove('active'));
-        const selector = servicio === 'domingo' ? '.servicio-btn:first-child' : '.servicio-btn:last-child';
-        const activeBtn = document.querySelector(selector);
-        if (activeBtn) activeBtn.classList.add('active');
-      } else {
-        render();
+      // Actualiza los botones de servicio (Hory screen)
+      document.querySelectorAll('.servicio-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelector(`.servicio-btn[onclick="cambiarServicio('${servicio}')"]`).classList.add('active');
+
+      // Actualiza las estadísticas (stats row)
+      const statsCards = document.querySelectorAll('.stats-row .stat-card');
+      if (statsCards.length >= 3) {
+        const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
+        statsCards[1].querySelector('.stat-numero').textContent = presentes;
+        statsCards[2].querySelector('.stat-numero').textContent = state.congregantes.length - presentes;
       }
     };
+
+    // Performance Optimization: Debounce for search input
+    window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
 
     window.filtrarBusqueda = function (valor) {
       state.busqueda = valor;
@@ -2399,7 +2541,8 @@
         }).join('');
     };
 
-    window.toggleAsistencia = async function (congreganteId, presente) {
+    // Performance Optimization: Store changes locally, save when exiting the screen
+    window.toggleAsistencia = function (congreganteId, presente) {
       state.asistenciasHoy[congreganteId] = presente;
 
       const item = document.getElementById('item-' + congreganteId);
@@ -2419,31 +2562,35 @@
         if (presentesCard) presentesCard.textContent = presentes;
         if (ausentesCard) ausentesCard.textContent = state.congregantes.length - presentes;
       }
+    };
 
+    window.guardarAsistencias = async function () {
       const hoy = new Date().toISOString().split('T')[0];
-      const { error } = await sb.from('asistencias').upsert({
-        congregante_id: congreganteId,
-        tipo_servicio: state.servicioActivo,
-        fecha: hoy,
-        presente: presente,
-        registrado_por: state.usuario.id
-      }, { onConflict: 'congregante_id,tipo_servicio,fecha' });
+      const asistenciasAPendientes = [];
 
-      if (error) {
-        mostrarToast('Error al guardar', 'error');
-        state.asistenciasHoy[congreganteId] = !presente;
-        if (item) {
-          if (presente) {
-            item.classList.remove('presente');
-          } else {
-            item.classList.add('presente');
-          }
-        }
-      } else {
-        mostrarToast(presente ? '✅ Marcado presente' : '❌ Marcado ausente');
+      for (const [congreganteId, presente] of Object.entries(state.asistenciasHoy)) {
+        asistenciasAPendientes.push({
+          congregante_id: congreganteId,
+          tipo_servicio: state.servicioActivo,
+          fecha: hoy,
+          presente: presente,
+          registrado_por: state.usuario.id
+        });
       }
 
-      // ❌ NO llamar a render() aquí
+      // Si no hay cambios, no hagas nada
+      if (asistenciasAPendientes.length === 0) return;
+
+      const { error } = await sb.from('asistencias').upsert(asistenciasAPendientes, {
+        onConflict: 'congregante_id,tipo_servicio,fecha'
+      });
+
+      if (error) {
+        console.error('Error al guardar asistencias:', error);
+        mostrarToast('⚠️ Error al guardar asistencias', 'error');
+      } else {
+        mostrarToast('✅ Asistencias guardadas correctamente');
+      }
     };
 
     window.previsualizarFoto = function (input) {
@@ -2460,50 +2607,6 @@
       }
     };
 
-    window.cambiarPantalla = async function (pantalla) {
-  // Si estamos saliendo de la pantalla de asistencia, guardar cambios pendientes
-  if (state.pantalla === 'asistencia' && pantalla !== 'asistencia') {
-    await guardarAsistencias(); // <<< NUEVA FUNCIÓN A CREAR
-  }
-  
-  state.pantalla = pantalla;
-  state.busqueda = '';
-  // ... (el resto de tu lógica para cargar datos en cambio de pantalla)
-  render();
-};
-
-    window.irA = function (pantalla) {
-      alert('Esta sección estará disponible próximamente 🚀\n\n→ ' + pantalla);
-    };
-
-   window.guardarAsistencias = async function () {
-  const hoy = new Date().toISOString().split('T')[0];
-  const asistenciasAPendientes = [];
-
-  for (const [congreganteId, presente] of Object.entries(state.asistenciasHoy)) {
-    asistenciasAPendientes.push({
-      congregante_id: congreganteId,
-      tipo_servicio: state.servicioActivo,
-      fecha: hoy,
-      presente: presente,
-      registrado_por: state.usuario.id
-    });
-  }
-
-  // Si no hay cambios, no hagas nada
-  if (asistenciasAPendientes.length === 0) return;
-
-  const { error } = await sb.from('asistencias').upsert(asistenciasAPendientes, {
-    onConflict: 'congregante_id,tipo_servicio,fecha'
-  });
-
-  if (error) {
-    console.error('Error al guardar asistencias:', error);
-    mostrarToast('⚠️ Error al guardar asistencias', 'error');
-  } else {
-    // mostrarToast('✅ Asistencias guardadas correctamente'); // Opcional, para no molestar si solo vuelve
-  }
-};
     async function cargarCongregantes() {
       const { data } = await sb.from('congregantes').select('*').order('nombre');
       state.congregantes = data || [];
@@ -2522,6 +2625,7 @@
     async function cargarStatsHory() {
       const el = document.getElementById('stats-hory');
       if (!el) return;
+      await cargarCongregantes();
       const hoy = new Date().toISOString().split('T')[0];
       const { data: asist } = await sb.from('asistencias').select('presente').eq('fecha', hoy);
       const presentes = (asist || []).filter(a => a.presente).length;
@@ -2534,177 +2638,9 @@
       </div>`;
     }
 
-    // ===== BIND APP =====
-    function bindApp() {
-      document.getElementById('btn-logout')?.addEventListener('click', async () => { await sb.auth.signOut(); });
-
-      const btnGuardar = document.getElementById('btn-guardar-nuevo');
-      if (btnGuardar) {
-        btnGuardar.addEventListener('click', async () => {
-          const nombre = document.getElementById('nuevo-nombre')?.value.trim();
-          const telefono = document.getElementById('nuevo-telefono')?.value.trim();
-          const err = document.getElementById('nuevo-error');
-          const exito = document.getElementById('nuevo-exito');
-          if (!nombre) { err.style.display = 'block'; err.textContent = 'El nombre es obligatorio.'; return; }
-          btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
-          err.style.display = 'none';
-
-          const { data: nuevo, error } = await sb.from('congregantes').insert({
-            nombre, telefono: telefono || null, estado: 'nuevo'
-          }).select().single();
-
-          if (error) {
-            err.style.display = 'block'; err.textContent = 'Error al guardar: ' + error.message;
-            btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
-            return;
-          }
-
-          const { data: nangarekos } = await sb.from('usuarios').select('id').eq('rol', 'nangareko');
-          if (nangarekos && nangarekos.length > 0) {
-            const alertas = nangarekos.map(n => ({
-              usuario_id: n.id,
-              congregante_id: nuevo.id,
-              tipo: 'nuevo_ingreso',
-              mensaje: `${nombre} ingresó por primera vez`
-            }));
-            await sb.from('alertas').insert(alertas);
-          }
-
-          await cargarCongregantes();
-          exito.style.display = 'block';
-          exito.textContent = `✅ ${nombre} registrado correctamente. Se notificó a los Ñangarekos.`;
-          document.getElementById('nuevo-nombre').value = '';
-          document.getElementById('nuevo-telefono').value = '';
-          state.fotoNuevo = null;
-          btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
-          mostrarToast(`✨ ${nombre} registrado!`);
-        });
-      }
-
-      if (state.usuario?.rol === 'hory' && state.pantalla === 'home') {
-        cargarStatsHory();
-      }
-    }
-
-    // ===== CARGAR USUARIO =====
-    async function cargarUsuario() {
-      if (!state.session) return;
-      const { data } = await sb.from('usuarios').select('*').eq('id', state.session.user.id).single();
-      state.usuario = data || null;
-    }
-
-  // ===== REALTIME LISTENER =====
-function setupRealtimeListeners() {
-  // Suscripción a la tabla 'congregantes' para notificar nuevos ingresos
-  sb.channel('alertas-nuevos')
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'congregantes' }, async (payload) => {
-      // payload.new contiene el nuevo registro insertado
-      const nuevoCongregante = payload.new;
-
-      // 1. Verificar si el nuevo congregante es un "Nuevo" (estado 'nuevo')
-      //    y si no tiene un ñangareko asignado aún (la alerta no se disparó antes)
-      if (nuevoCongregante.estado === 'nuevo' && !nuevoCongregante.nangareko_id) {
-
-        // 2. Si el usuario actual es un Ñangareko, actualiza su lista de alertas
-        if (state.usuario?.rol === 'nangareko') {
-          // Si el Ñangareko está en la pantalla de inicio o alertas, actualiza el estado y re-renderiza
-          if (state.pantalla === 'home' || state.pantalla === 'nangareko-alertas') {
-            await cargarDatosNangareko();
-            mostrarToast(`🚨 ¡Nuevo ingreso! ${nuevoCongregante.nombre}`);
-            render();
-          }
-        }
-      }
-    })
-    .subscribe();
-// Versión debounced para limitar la frecuencia de búsqueda
-window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
-
-// Función de filtrado original
-window.filtrarBusqueda = function (valor) {
-  state.busqueda = valor;
-  const lista = document.getElementById('lista-congregantes');
-  if (!lista) return;
-
-  const filtrados = state.congregantes.filter(c =>
-    c.nombre.toLowerCase().includes(valor.toLowerCase())
-  );
-
-  // Re-renderiza solo la lista, no toda la página
-  lista.innerHTML = filtrados.length === 0 ?
-    `<div style="text-align:center;color:var(--texto-suave);padding:32px;font-size:14px">No se encontraron resultados.</div>` :
-    filtrados.map(c => {
-      // (código de renderizado del item congregante, copiado de renderAsistencia)
-      const presente = state.asistenciasHoy[c.id] || false;
-      const iniciales = c.nombre.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
-      return `
-        <div class="congregante-item ${presente ? 'presente' : ''}" id="item-${c.id}">
-          <div class="congregante-left">
-            <div class="congregante-foto">${c.foto_url ? `<img src="${c.foto_url}" />` : sanitizar(iniciales)}</div>
-            <div>
-              <div class="congregante-nombre">${sanitizar(c.nombre)}</div>
-              <div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>
-            </div>
-          </div>
-          <label class="switch">
-            <input type="checkbox" ${presente ? 'checked' : ''} onchange="toggleAsistencia('${c.id}', this.checked)" />
-            <span class="slider"></span>
-          </label>
-        </div>`;
-    }).join('');
-};
-  
-}```
-
-// ===== INIT =====
-async function init() {
-  const { data: { session } } = await sb.auth.getSession();
-  state.session = session;
-
-  if (session) {
-    await cargarUsuario();
-    setupRealtimeListeners();
-  }
-  
-  state.loading = false;
-  render();
-
-  sb.auth.onAuthStateChange(async (event, session) => {
-    state.session = session;
-    if (session) { await cargarUsuario(); }
-    else { state.usuario = null; }
-    render();
-  });
-}
-
-// ===== UTILIDADES =====
-// Función Debounce para limitar la frecuencia de ejecución de una función
-function debounce(fn, delay) {
-  let timeoutId;
-  return function(...args) {
-    clearTimeout(timeoutId);
-    timeoutId = setTimeout(() => {
-      fn.apply(this, args);
-    }, delay);
-  };
-}
-     
-    // ===== INIT =====
-    
-    async function init() {
-      const { data: { session } } = await sb.auth.getSession();
-      state.session = session;
-      if (session) await cargarUsuario();
-      state.loading = false;
-      render();
-
-      sb.auth.onAuthStateChange(async (event, session) => {
-        state.session = session;
-        if (session) { await cargarUsuario(); }
-        else { state.usuario = null; }
-        render();
-      });
-    }
-</script>
+    // Initialize application when DOM is ready
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
 </body>
+
 </html>
