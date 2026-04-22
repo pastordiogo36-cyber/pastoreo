@@ -1976,16 +1976,31 @@
     `;
     }
 
-    window.toggleAsistenciaDC = function (congreganteId, presente) {
-      state.asistenciaDCHoy[congreganteId] = presente;
+    window.toggleAsistencia = function (congreganteId, presente) {
+  state.asistenciasHoy[congreganteId] = presente;
 
-      const item = document.getElementById(`dc-item-${congreganteId}`);
-      if (item) {
-        if (presente) {
-          item.classList.add('presente');
-        } else {
-          item.classList.remove('presente');
-        }
+  const item = document.getElementById('item-' + congreganteId);
+  if (item) {
+    if (presente) {
+      item.classList.add('presente');
+    } else {
+      item.classList.remove('presente');
+    }
+  }
+
+  // --- Actualizar stats locales ---
+  const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
+  const statsCards = document.querySelectorAll('.stats-row .stat-card');
+  if (statsCards.length >= 3) {
+    const presentesCard = statsCards[1]?.querySelector('.stat-numero');
+    const ausentesCard = statsCards[2]?.querySelector('.stat-numero');
+    if (presentesCard) presentesCard.textContent = presentes;
+    if (ausentesCard) ausentesCard.textContent = state.congregantes.length - presentes;
+  }
+  
+  // No llamar a render() ni a la base de datos aquí.
+  // La base de datos se actualizará al guardar o al salir de la pantalla.
+};
       }
 
       const presentes = Object.values(state.asistenciaDCHoy).filter(Boolean).length;
@@ -2256,8 +2271,8 @@
         </div>
       </div>
 
-      <input class="search-input" type="text" placeholder="🔍 Buscar congregante..." 
-        value="${state.busqueda}" oninput="filtrarBusqueda(this.value)" />
+  <input class="search-input" type="text" placeholder="🔍 Buscar congregante..." 
+    value="${state.busqueda}" oninput="debouncedFiltrarBusqueda(this.value)" />
 
       <div id="lista-congregantes">
         ${filtrados.length === 0 ?
@@ -2446,32 +2461,49 @@
     };
 
     window.cambiarPantalla = async function (pantalla) {
-      state.pantalla = pantalla;
-      state.busqueda = '';
-      if (pantalla === 'asistencia') {
-        await cargarCongregantes();
-        await cargarAsistenciasHoy();
-      }
-      if (pantalla === 'home' && state.usuario?.rol === 'pastor') {
-        await cargarDatosPastor();
-      }
-      if (pantalla === 'home' && state.usuario?.rol === 'nangareko') {
-        await cargarDatosNangareko();
-      }
-      if (pantalla === 'home' && state.usuario?.rol === 'lider_dc') {
-        await cargarDatosLiderDC();
-      }
-      if (pantalla === 'lider-dc-asistencia') {
-        state.asistenciaDCHoy = {};
-      }
-      render();
-    };
+  // Si estamos saliendo de la pantalla de asistencia, guardar cambios pendientes
+  if (state.pantalla === 'asistencia' && pantalla !== 'asistencia') {
+    await guardarAsistencias(); // <<< NUEVA FUNCIÓN A CREAR
+  }
+  
+  state.pantalla = pantalla;
+  state.busqueda = '';
+  // ... (el resto de tu lógica para cargar datos en cambio de pantalla)
+  render();
+};
 
     window.irA = function (pantalla) {
       alert('Esta sección estará disponible próximamente 🚀\n\n→ ' + pantalla);
     };
 
-    // ===== CARGAR DATOS =====
+   window.guardarAsistencias = async function () {
+  const hoy = new Date().toISOString().split('T')[0];
+  const asistenciasAPendientes = [];
+
+  for (const [congreganteId, presente] of Object.entries(state.asistenciasHoy)) {
+    asistenciasAPendientes.push({
+      congregante_id: congreganteId,
+      tipo_servicio: state.servicioActivo,
+      fecha: hoy,
+      presente: presente,
+      registrado_por: state.usuario.id
+    });
+  }
+
+  // Si no hay cambios, no hagas nada
+  if (asistenciasAPendientes.length === 0) return;
+
+  const { error } = await sb.from('asistencias').upsert(asistenciasAPendientes, {
+    onConflict: 'congregante_id,tipo_servicio,fecha'
+  });
+
+  if (error) {
+    console.error('Error al guardar asistencias:', error);
+    mostrarToast('⚠️ Error al guardar asistencias', 'error');
+  } else {
+    // mostrarToast('✅ Asistencias guardadas correctamente'); // Opcional, para no molestar si solo vuelve
+  }
+};
     async function cargarCongregantes() {
       const { data } = await sb.from('congregantes').select('*').order('nombre');
       state.congregantes = data || [];
@@ -2585,11 +2617,45 @@ function setupRealtimeListeners() {
       }
     })
     .subscribe();
+// Versión debounced para limitar la frecuencia de búsqueda
+window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
+
+// Función de filtrado original
+window.filtrarBusqueda = function (valor) {
+  state.busqueda = valor;
+  const lista = document.getElementById('lista-congregantes');
+  if (!lista) return;
+
+  const filtrados = state.congregantes.filter(c =>
+    c.nombre.toLowerCase().includes(valor.toLowerCase())
+  );
+
+  // Re-renderiza solo la lista, no toda la página
+  lista.innerHTML = filtrados.length === 0 ?
+    `<div style="text-align:center;color:var(--texto-suave);padding:32px;font-size:14px">No se encontraron resultados.</div>` :
+    filtrados.map(c => {
+      // (código de renderizado del item congregante, copiado de renderAsistencia)
+      const presente = state.asistenciasHoy[c.id] || false;
+      const iniciales = c.nombre.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+      return `
+        <div class="congregante-item ${presente ? 'presente' : ''}" id="item-${c.id}">
+          <div class="congregante-left">
+            <div class="congregante-foto">${c.foto_url ? `<img src="${c.foto_url}" />` : sanitizar(iniciales)}</div>
+            <div>
+              <div class="congregante-nombre">${sanitizar(c.nombre)}</div>
+              <div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>
+            </div>
+          </div>
+          <label class="switch">
+            <input type="checkbox" ${presente ? 'checked' : ''} onchange="toggleAsistencia('${c.id}', this.checked)" />
+            <span class="slider"></span>
+          </label>
+        </div>`;
+    }).join('');
+};
+  
 }```
 
-3.  **Llama a la nueva función `setupRealtimeListeners()`** dentro de `init()`, después de que el usuario haya iniciado sesión:
-
-```javascript
 // ===== INIT =====
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
@@ -2597,7 +2663,6 @@ async function init() {
 
   if (session) {
     await cargarUsuario();
-    // AÑADE ESTA LÍNEA AQUÍ PARA INICIAR EL LISTENER DE REALTIME
     setupRealtimeListeners();
   }
   
@@ -2612,13 +2677,6 @@ async function init() {
   });
 }
 
-#### Paso 1: Optimizar el Filtro de Búsqueda con Debounce
-
-Para evitar que se filtre la lista en cada pulsación de tecla, implementa una función `debounce`. Esto retrasa la ejecución del filtro hasta que el usuario deja de escribir por un breve período de tiempo (ej. 300ms).
-
-1.  **Copia el siguiente código** y pégalo al principio de tu script, antes de `const state = { ... }`.
-
-```javascript
 // ===== UTILIDADES =====
 // Función Debounce para limitar la frecuencia de ejecución de una función
 function debounce(fn, delay) {
@@ -2647,9 +2705,6 @@ function debounce(fn, delay) {
         render();
       });
     }
-
-    init();
-  </script>
+</script>
 </body>
-
 </html>
