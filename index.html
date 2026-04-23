@@ -872,7 +872,7 @@
     };
 
     // ============================================
-    // UTILITIES & GLOBAL FUNCTIONS
+    // UTILITIES & GLOBAL FUNCTIONS (Common to all roles)
     // ============================================
 
     // Toast notifications
@@ -1318,7 +1318,7 @@
       setTimeout(() => dibujarGraficoAsistencia(), 100);
     }
 
-    async function dibujarGraficoAsistencia() {
+    function dibujarGraficoAsistencia() {
       const canvas = document.getElementById('asistenciaChart');
       if (!canvas) return;
 
@@ -2495,10 +2495,10 @@
       }
     };
 
-    // Performance Optimization: Debounce for search input to prevent excessive DOM manipulation
-    window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
-
-    // Filter congregation list based on search input
+    /**
+     * Filters the congregant list based on the search input value.
+     * This function is called by the debounced version to avoid excessive updates.
+     */
     window.filtrarBusqueda = function (valor) {
       state.busqueda = valor;
       const lista = document.getElementById('lista-congregantes');
@@ -2530,7 +2530,15 @@
         }).join('');
     };
 
-    // Update attendance locally (on screen) without saving to DB immediately
+    // Performance Optimization: Debounce for search input to prevent excessive DOM manipulation
+    // NOTE: This definition MUST appear AFTER the definition of `filtrarBusqueda` to avoid ReferenceError.
+    window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
+
+    /**
+     * Updates local state and UI for attendance. Does NOT save to database immediately.
+     * @param {string} congreganteId - ID of the congregant.
+     * @param {boolean} presente - True if present, false otherwise.
+     */
     window.toggleAsistencia = function (congreganteId, presente) {
       state.asistenciasHoy[congreganteId] = presente;
 
@@ -2553,7 +2561,10 @@
       }
     };
 
-    // Save all pending attendance changes to DB (batch save)
+    /**
+     * Saves all local attendance changes (from state.asistenciasHoy) to the database.
+     * This is called when exiting the attendance screen.
+     */
     window.guardarAsistencias = async function () {
       const hoy = new Date().toISOString().split('T')[0];
       const asistenciasAPendientes = [];
@@ -2649,7 +2660,6 @@
         render();
       });
     }
-
   </script>
 </body>
 
