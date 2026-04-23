@@ -1263,60 +1263,79 @@
     `;
     }
 
-    async function cargarDatosPastor() {
-      if (!state.usuario || state.usuario.rol !== 'pastor') return;
+async function cargarDatosPastor() {
+    if (!state.usuario || state.usuario.rol !== 'pastor') return;
 
-      const fechaLimite = new Date();
-      fechaLimite.setDate(fechaLimite.getDate() - 7);
-      const fechaStr = fechaLimite.toISOString().split('T')[0];
+    const fechaLimite = new Date();
+    fechaLimite.setDate(fechaLimite.getDate() - 7);
+    const fechaStr = fechaLimite.toISOString().split('T')[0];
 
-      const { data: lideres } = await sb.from('usuarios')
-        .select('id, nombre, rol, email')
-        .neq('rol', 'pastor');
-      state.lideres = lideres || [];
+    // ATENCIÓN: Esta consulta de líderes puede fallar si RLS está activo
+    // y no hay una política específica que permita al pastor leer a todos.
+    // Si la política de RLS de Pastor (pastores leen todos) causa recursión,
+    // es mejor eliminar esta consulta y obtener la información de líderes
+    // de forma indirecta (no implementado aquí, pero es la razón por la que
+    // RLS es complicado).
 
-      const { data: nuevos } = await sb.from('congregantes')
-        .select('id', { count: 'exact' })
-        .gte('created_at', fechaStr);
-      state.nuevosUltimaSemana = nuevos?.length || 0;
+    // --- Versión simplificada para evitar recursión ---
+    // En lugar de obtener todos los líderes aquí, nos centraremos en los datos
+    // de la congregación, que sí permitiremos ver al Pastor a través de RLS en otras tablas.
+    // Si la lista de líderes es crucial, tendríamos que re-implementar RLS
+    // de manera diferente o permitir que el pastor lea todos los usuarios.
 
-      const { data: asistenciasDomingo } = await sb.from('asistencias')
-        .select('presente')
-        .eq('tipo_servicio', 'domingo')
-        .gte('fecha', fechaStr);
+    // 1. Obtener datos de congregantes
+    // (Asegúrate que RLS en tabla congregantes permite leer a pastores)
+    const { data: congregantesData } = await sb.from('congregantes').select('*');
+    state.congregantes = congregantesData || [];
+    const totalCongregantes = state.congregantes.length;
 
-      const { data: asistenciasMiercoles } = await sb.from('asistencias')
-        .select('presente')
-        .eq('tipo_servicio', 'miercoles')
-        .gte('fecha', fechaStr);
+    // 2. Obtener estadísticas de nuevos (últimos 7 días)
+    const { data: nuevos } = await sb.from('congregantes')
+      .select('id', { count: 'exact' })
+      .gte('created_at', fechaStr);
+    state.nuevosUltimaSemana = nuevos?.length || 0;
 
-      const todasAsistencias = [...(asistenciasDomingo || []), ...(asistenciasMiercoles || [])];
-      if (todasAsistencias.length > 0) {
-        const presentes = todasAsistencias.filter(a => a.presente).length;
-        state.asistenciaPromedio = Math.round((presentes / todasAsistencias.length) * 100);
-      } else {
-        state.asistenciaPromedio = 0;
-      }
+    // 3. Obtener asistencias para el promedio (últimos 7 días)
+    const { data: asistenciasDomingo } = await sb.from('asistencias')
+      .select('presente')
+      .eq('tipo_servicio', 'domingo')
+      .gte('fecha', fechaStr);
 
-      const { data: ultimos } = await sb.from('congregantes')
-        .select('nombre, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5);
-      state.ultimosCongregantes = ultimos || [];
+    const { data: asistenciasMiercoles } = await sb.from('asistencias')
+      .select('presente')
+      .eq('tipo_servicio', 'miercoles')
+      .gte('fecha', fechaStr);
 
-      const { data: alertas } = await sb.from('alertas')
-        .select('tipo, mensaje, created_at')
-        .order('created_at', { ascending: false })
-        .limit(5);
-      state.alertasRecientes = alertas || [];
-
-      const { data: grupos } = await sb.from('grupos_dc')
-        .select('*, lider:lider_id(nombre)')
-        .order('created_at', { ascending: false });
-      state.gruposDC = grupos || [];
-
-      setTimeout(() => dibujarGraficoAsistencia(), 100);
+    const todasAsistencias = [...(asistenciasDomingo || []), ...(asistenciasMiercoles || [])];
+    if (todasAsistencias.length > 0) {
+      const presentes = todasAsistencias.filter(a => a.presente).length;
+      state.asistenciaPromedio = Math.round((presentes / todasAsistencias.length) * 100);
+    } else {
+      state.asistenciaPromedio = 0;
     }
+
+    // 4. Obtener últimos ingresos
+    const { data: ultimos } = await sb.from('congregantes')
+      .select('nombre, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    state.ultimosCongregantes = ultimos || [];
+
+    // 5. Obtener alertas recientes (asegúrate que RLS en tabla alertas permite leer a pastores)
+    const { data: alertas } = await sb.from('alertas')
+      .select('tipo, mensaje, created_at')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    state.alertasRecientes = alertas || [];
+
+    // 6. Obtener grupos DC (asegúrate que RLS en tabla grupos_dc permite leer a pastores)
+    const { data: grupos } = await sb.from('grupos_dc')
+      .select('*, lider:lider_id(nombre)')
+      .order('created_at', { ascending: false });
+    state.gruposDC = grupos || [];
+
+    setTimeout(() => dibujarGraficoAsistencia(), 100);
+}
 
     function dibujarGraficoAsistencia() {
       const canvas = document.getElementById('asistenciaChart');
