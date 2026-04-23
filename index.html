@@ -829,6 +829,9 @@
   <div id="app"></div>
 
   <script>
+    // ============================================
+    // SUPABASE CONFIGURATION
+    // ============================================
     const { createClient } = supabase;
 
     // TODO: Reemplaza con tus claves de Supabase si cambian
@@ -869,7 +872,7 @@
     };
 
     // ============================================
-    // UTILITIES
+    // UTILITIES & GLOBAL FUNCTIONS
     // ============================================
 
     // Toast notifications
@@ -900,9 +903,21 @@
       };
     }
 
+    function estadoLabel(estado) {
+      const labels = { nuevo: '✨ Nuevo', en_proceso: '🔵 En proceso', en_anua: '📚 En Añua', bautizado: '💧 Bautizado', en_dc: '🏠 En DC', graduado: '🎓 Graduado', visita: '👋 Visita' };
+      return labels[estado] || estado;
+    }
+
     // ============================================
-    // REALTIME AND AUTHENTICATION
+    // REALTIME AND AUTHENTICATION MANAGEMENT
     // ============================================
+
+    // Load user profile from 'usuarios' table
+    async function cargarUsuario() {
+      if (!state.session) return;
+      const { data } = await sb.from('usuarios').select('*').eq('id', state.session.user.id).single();
+      state.usuario = data || null;
+    }
 
     // Supabase Realtime Listener (for Ñangareko new alerts)
     function setupRealtimeListeners() {
@@ -929,35 +944,8 @@
         .subscribe();
     }
 
-    // Load user profile from 'usuarios' table
-    async function cargarUsuario() {
-      if (!state.session) return;
-      const { data } = await sb.from('usuarios').select('*').eq('id', state.session.user.id).single();
-      state.usuario = data || null;
-    }
-
-    // Initial app load function
-    async function init() {
-      const { data: { session } } = await sb.auth.getSession();
-      state.session = session;
-
-      if (session) {
-        await cargarUsuario();
-        setupRealtimeListeners();
-      }
-
-      state.loading = false;
-      render();
-
-      sb.auth.onAuthStateChange(async (event, session) => {
-        state.session = session;
-        if (session) { await cargarUsuario(); } else { state.usuario = null; }
-        render();
-      });
-    }
-
     // ============================================
-    // SCREEN MANAGEMENT & NAVIGATION
+    // RENDER AND NAVIGATION LOGIC
     // ============================================
 
     function render() {
@@ -974,41 +962,17 @@
       bindApp();
     }
 
-    function renderPantalla() {
-      const rol = state.usuario.rol;
-      if (state.pantalla === 'home') {
-        if (rol === 'hory') return renderHomeHory();
-        if (rol === 'pastor') return renderHomePastor();
-        if (rol === 'nangareko') return renderHomeNangareko();
-        if (rol === 'lider_dc') return renderHomeLiderDC();
-      }
-      if (state.pantalla === 'asistencia') return renderAsistencia();
-      if (state.pantalla === 'nuevo-ingreso') return renderNuevoIngreso();
-      // Pastor sub-pantallas
-      if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
-      if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
-      if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
-      if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
-      if (state.pantalla === 'pastor-grupos') return renderPastorGrupos();
-      // Ñangareko sub-pantallas
-      if (state.pantalla === 'nangareko-alertas') return renderNangarekoAlertas();
-      if (state.pantalla === 'nangareko-cuidados') return renderNangarekoCuidados();
-      if (state.pantalla === 'nangareko-fichas') return renderNangarekoFichas();
-      // Líder DC sub-pantallas
-      if (state.pantalla === 'lider-dc-grupo') return renderLiderDCGrupo();
-      if (state.pantalla === 'lider-dc-asistencia') return renderLiderDCAsistencia();
-      if (state.pantalla === 'lider-dc-fichas') return renderLiderDCFichas();
-      return `<div class="coming-soon"><div class="big-icon">🚧</div><h3>Próximamente</h3><p>Esta sección estará disponible en la siguiente etapa.</p><div class="tag-etapa">En construcción</div></div>`;
-    }
-
     window.cambiarPantalla = async function (pantalla) {
-      // Si estamos saliendo de la pantalla de asistencia, guardar cambios pendientes
+      // 1. Guardar asistencias si salimos de la pantalla de asistencia
       if (state.pantalla === 'asistencia' && pantalla !== 'asistencia') {
         await guardarAsistencias();
       }
 
+      // 2. Actualizar estado y re-renderizar
       state.pantalla = pantalla;
       state.busqueda = '';
+
+      // 3. Cargar datos específicos de la nueva pantalla
       if (pantalla === 'asistencia') {
         await cargarCongregantes();
         await cargarAsistenciasHoy();
@@ -1022,6 +986,7 @@
       if (pantalla === 'lider-dc-asistencia') {
         state.asistenciaDCHoy = {};
       }
+
       render();
     };
 
@@ -1107,7 +1072,7 @@
     }
 
     // ============================================
-    // HEADER & COMMON UI
+    // HEADER & COMMON UI BINDING
     // ============================================
 
     function renderHeader() {
@@ -1129,6 +1094,7 @@
     function bindApp() {
       document.getElementById('btn-logout')?.addEventListener('click', async () => { await sb.auth.signOut(); });
 
+      // Binding for Nuevo Ingreso screen logic
       const btnGuardar = document.getElementById('btn-guardar-nuevo');
       if (btnGuardar) {
         btnGuardar.addEventListener('click', async () => {
@@ -1173,14 +1139,36 @@
       }
     }
 
-    function estadoLabel(estado) {
-      const labels = { nuevo: '✨ Nuevo', en_proceso: '🔵 En proceso', en_anua: '📚 En Añua', bautizado: '💧 Bautizado', en_dc: '🏠 En DC', graduado: '🎓 Graduado', visita: '👋 Visita' };
-      return labels[estado] || estado;
-    }
+    // ============================================
+    // SECCIÓN PASTOR DASHBOARD & LOGIC
+    // ============================================
 
-    // ============================================
-    // SECCIÓN PASTOR
-    // ============================================
+    function renderPantalla() {
+      const rol = state.usuario.rol;
+      if (state.pantalla === 'home') {
+        if (rol === 'hory') return renderHomeHory();
+        if (rol === 'pastor') return renderHomePastor();
+        if (rol === 'nangareko') return renderHomeNangareko();
+        if (rol === 'lider_dc') return renderHomeLiderDC();
+      }
+      if (state.pantalla === 'asistencia') return renderAsistencia();
+      if (state.pantalla === 'nuevo-ingreso') return renderNuevoIngreso();
+      // Pastor sub-pantallas
+      if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
+      if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
+      if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
+      if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
+      if (state.pantalla === 'pastor-grupos') return renderPastorGrupos();
+      // Ñangareko sub-pantallas
+      if (state.pantalla === 'nangareko-alertas') return renderNangarekoAlertas();
+      if (state.pantalla === 'nangareko-cuidados') return renderNangarekoCuidados();
+      if (state.pantalla === 'nangareko-fichas') return renderNangarekoFichas();
+      // Líder DC sub-pantallas
+      if (state.pantalla === 'lider-dc-grupo') return renderLiderDCGrupo();
+      if (state.pantalla === 'lider-dc-asistencia') return renderLiderDCAsistencia();
+      if (state.pantalla === 'lider-dc-fichas') return renderLiderDCFichas();
+      return `<div class="coming-soon"><div class="big-icon">🚧</div><h3>Próximamente</h3><p>Esta sección estará disponible en la siguiente etapa.</p><div class="tag-etapa">En construcción</div></div>`;
+    }
 
     function renderHomePastor() {
       const u = state.usuario;
@@ -1327,11 +1315,10 @@
         .order('created_at', { ascending: false });
       state.gruposDC = grupos || [];
 
-      // Dibuja el gráfico después de cargar los datos (o usa datos mock si es necesario)
-      // setTimeout(() => dibujarGraficoAsistencia(), 100);
+      setTimeout(() => dibujarGraficoAsistencia(), 100);
     }
 
-    function dibujarGraficoAsistencia() {
+    async function dibujarGraficoAsistencia() {
       const canvas = document.getElementById('asistenciaChart');
       if (!canvas) return;
 
@@ -1520,7 +1507,7 @@
     }
 
     // ============================================
-    // SECCIÓN ÑANGAREKO
+    // SECCIÓN ÑANGAREKO DASHBOARD & LOGIC
     // ============================================
 
     function renderHomeNangareko() {
@@ -1888,7 +1875,7 @@
     };
 
     // ============================================
-    // SECCIÓN LÍDER DC
+    // SECCIÓN LÍDER DC DASHBOARD & LOGIC
     // ============================================
 
     function renderHomeLiderDC() {
@@ -2322,7 +2309,7 @@
     };
 
     // ============================================
-    // SECCIÓN HORY (Asistencia)
+    // SECCIÓN HORY DASHBOARD & LOGIC
     // ============================================
 
     function renderHomeHory() {
@@ -2486,30 +2473,32 @@
       </div>`;
     }
 
+    // Function to handle changing service in attendance screen
     window.cambiarServicio = async function (servicio) {
       state.servicioActivo = servicio;
       await cargarAsistenciasHoy();
+      filtrarBusqueda(state.busqueda); // Re-render list with updated attendance data
 
-      // Actualizar la lista de congregantes y stats sin re-renderizar todo
-      // Llama a filtrarBusqueda directamente para actualizar la lista de una vez.
-      filtrarBusqueda(state.busqueda); // Re-filtra con los datos de asistencia actualizados.
-
-      // Actualiza los botones de servicio (Hory screen)
+      // Update service buttons UI
       document.querySelectorAll('.servicio-btn').forEach(btn => btn.classList.remove('active'));
-      document.querySelector(`.servicio-btn[onclick="cambiarServicio('${servicio}')"]`).classList.add('active');
+      const activeBtn = document.querySelector(`.servicio-btn[onclick="cambiarServicio('${servicio}')"]`);
+      if (activeBtn) activeBtn.classList.add('active');
 
-      // Actualiza las estadísticas (stats row)
+      // Update stats UI
+      const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
       const statsCards = document.querySelectorAll('.stats-row .stat-card');
       if (statsCards.length >= 3) {
-        const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
-        statsCards[1].querySelector('.stat-numero').textContent = presentes;
-        statsCards[2].querySelector('.stat-numero').textContent = state.congregantes.length - presentes;
+        const presentesCard = statsCards[1]?.querySelector('.stat-numero');
+        const ausentesCard = statsCards[2]?.querySelector('.stat-numero');
+        if (presentesCard) presentesCard.textContent = presentes;
+        if (ausentesCard) ausentesCard.textContent = state.congregantes.length - presentes;
       }
     };
 
-    // Performance Optimization: Debounce for search input
+    // Performance Optimization: Debounce for search input to prevent excessive DOM manipulation
     window.debouncedFiltrarBusqueda = debounce(filtrarBusqueda, 300);
 
+    // Filter congregation list based on search input
     window.filtrarBusqueda = function (valor) {
       state.busqueda = valor;
       const lista = document.getElementById('lista-congregantes');
@@ -2541,7 +2530,7 @@
         }).join('');
     };
 
-    // Performance Optimization: Store changes locally, save when exiting the screen
+    // Update attendance locally (on screen) without saving to DB immediately
     window.toggleAsistencia = function (congreganteId, presente) {
       state.asistenciasHoy[congreganteId] = presente;
 
@@ -2564,6 +2553,7 @@
       }
     };
 
+    // Save all pending attendance changes to DB (batch save)
     window.guardarAsistencias = async function () {
       const hoy = new Date().toISOString().split('T')[0];
       const asistenciasAPendientes = [];
@@ -2578,7 +2568,6 @@
         });
       }
 
-      // Si no hay cambios, no hagas nada
       if (asistenciasAPendientes.length === 0) return;
 
       const { error } = await sb.from('asistencias').upsert(asistenciasAPendientes, {
@@ -2640,6 +2629,27 @@
 
     // Initialize application when DOM is ready
     document.addEventListener('DOMContentLoaded', init);
+
+    // Initial app load function
+    async function init() {
+      const { data: { session } } = await sb.auth.getSession();
+      state.session = session;
+
+      if (session) {
+        await cargarUsuario();
+        setupRealtimeListeners();
+      }
+
+      state.loading = false;
+      render();
+
+      sb.auth.onAuthStateChange(async (event, session) => {
+        state.session = session;
+        if (session) { await cargarUsuario(); } else { state.usuario = null; }
+        render();
+      });
+    }
+
   </script>
 </body>
 
