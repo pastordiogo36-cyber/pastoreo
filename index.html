@@ -1406,6 +1406,7 @@ async function cargarDatosPastor() {
 
     const [
       congregantesRes,
+      lideresRes,
       nuevosRes,
       asistDomRes,
       asistMieRes,
@@ -1414,6 +1415,7 @@ async function cargarDatosPastor() {
       gruposRes
     ] = await Promise.all([
       sb.from('congregantes').select('*'),
+      sb.from('usuarios').select('id, nombre, email, rol').order('nombre', { ascending: true }),
       sb.from('congregantes').select('id', { count: 'exact' }).gte('created_at', fechaStr),
       sb.from('asistencias').select('presente').eq('tipo_servicio', 'domingo').gte('fecha', fechaStr),
       sb.from('asistencias').select('presente').eq('tipo_servicio', 'miercoles').gte('fecha', fechaStr),
@@ -1428,6 +1430,13 @@ async function cargarDatosPastor() {
       state.congregantes = [];
     } else {
       state.congregantes = congregantesRes.data || [];
+    }
+
+    if (lideresRes.error) {
+      console.error('Error al cargar usuarios/líderes (Pastor):', lideresRes.error);
+      state.lideres = [];
+    } else {
+      state.lideres = lideresRes.data || [];
     }
 
     if (nuevosRes.error) {
@@ -1509,17 +1518,42 @@ async function cargarDatosPastor() {
     }
 
     function renderPastorLideres() {
+      const usuarios = state.lideres || [];
+      const roles = [
+        { value: 'pastor', label: 'Pastor' },
+        { value: 'nangareko', label: 'Ñangareko' },
+        { value: 'hory', label: 'Hory' },
+        { value: 'lider_dc', label: 'Líder DC' }
+      ];
+
       return `
       <div class="main-content">
         <div class="section-header">
           <h3>👥 Líderes</h3>
           <button class="btn-back" onclick="cambiarPantalla('home')">← Volver</button>
         </div>
-        <div class="coming-soon">
-          <div class="big-icon">🚧</div>
-          <h3>Próximamente</h3>
-          <p>Gestión completa de líderes</p>
-        </div>
+
+        ${usuarios.length === 0 ?
+          `<div class="coming-soon">
+            <div class="big-icon">👥</div>
+            <h3>No hay usuarios visibles</h3>
+            <p>Si esto no es correcto, revisá permisos/RLS de la tabla usuarios</p>
+          </div>` :
+          usuarios.map(u => `
+            <div class="info-section" style="margin-bottom:12px">
+              <div class="info-row">
+                <span class="label">${sanitizar(u.nombre || '(Sin nombre)')}</span>
+                <span style="font-size:12px;color:var(--texto-suave)">${sanitizar(u.email || '')}</span>
+              </div>
+              <div class="info-row">
+                <span class="label">Rol</span>
+                <select style="width:200px" onchange="actualizarRolUsuario('${u.id}', this.value)">
+                  ${roles.map(r => `<option value="${r.value}" ${u.rol === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+          `).join('')
+        }
       </div>
     `;
     }
@@ -1686,6 +1720,21 @@ async function cargarDatosPastor() {
       render();
     };
 
+    function actualizarCongreganteEnColecciones(congreganteId, patch) {
+      const colecciones = [
+        state.congregantes,
+        state.misCuidados,
+        state.alertasNuevos,
+        state.miembrosGrupo
+      ];
+
+      for (const col of colecciones) {
+        if (!Array.isArray(col)) continue;
+        const idx = col.findIndex(c => c?.id === congreganteId);
+        if (idx >= 0) col[idx] = { ...col[idx], ...patch };
+      }
+    }
+
     window.actualizarEstadoCongregante = async function (congreganteId, nuevoEstado) {
       try {
         const { error } = await withTimeout(
@@ -1695,8 +1744,7 @@ async function cargarDatosPastor() {
         );
         if (error) throw error;
 
-        const idx = (state.congregantes || []).findIndex(c => c.id === congreganteId);
-        if (idx >= 0) state.congregantes[idx].estado = nuevoEstado;
+        actualizarCongreganteEnColecciones(congreganteId, { estado: nuevoEstado });
         mostrarToast('✅ Estado actualizado');
         render();
       } catch (e) {
@@ -1717,8 +1765,7 @@ async function cargarDatosPastor() {
         );
         if (error) throw error;
 
-        const idx = (state.congregantes || []).findIndex(c => c.id === congreganteId);
-        if (idx >= 0) state.congregantes[idx].grupo_dc_id = grupo_dc_id;
+        actualizarCongreganteEnColecciones(congreganteId, { grupo_dc_id });
         mostrarToast('✅ Grupo DC actualizado');
         render();
       } catch (e) {
@@ -1729,21 +1776,114 @@ async function cargarDatosPastor() {
       }
     };
 
+    window.actualizarRolUsuario = async function (usuarioId, nuevoRol) {
+      try {
+        const { error } = await withTimeout(
+          sb.from('usuarios').update({ rol: nuevoRol }).eq('id', usuarioId),
+          12000,
+          'actualizar rol'
+        );
+        if (error) throw error;
+
+        const idx = (state.lideres || []).findIndex(u => u.id === usuarioId);
+        if (idx >= 0) state.lideres[idx].rol = nuevoRol;
+        mostrarToast('✅ Rol actualizado');
+      } catch (e) {
+        console.error('Error al actualizar rol:', e);
+        mostrarToast('⚠️ No se pudo actualizar el rol', 'error');
+        await cargarDatosPastor();
+        render();
+      }
+    };
+
     function renderPastorCalendario() {
+      const grupos = state.gruposDC || [];
+      const eventos = (() => {
+        try {
+          const raw = localStorage.getItem('pastoreo_cal_events');
+          const parsed = raw ? JSON.parse(raw) : [];
+          return Array.isArray(parsed) ? parsed : [];
+        } catch {
+          return [];
+        }
+      })();
+
       return `
       <div class="main-content">
         <div class="section-header">
           <h3>📅 Calendario</h3>
           <button class="btn-back" onclick="cambiarPantalla('home')">← Volver</button>
         </div>
-        <div class="coming-soon">
-          <div class="big-icon">🚧</div>
-          <h3>Próximamente</h3>
-          <p>Calendario de reuniones</p>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <h3>Servicios</h3>
+          <div class="info-row"><span class="label">Domingo</span><span>09:00</span></div>
+          <div class="info-row"><span class="label">Miércoles</span><span>19:30</span></div>
+        </div>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <h3>Grupos DC</h3>
+          ${grupos.length === 0 ?
+            '<div class="info-row"><span class="label">No hay grupos creados</span></div>' :
+            grupos.map(g => `
+              <div class="info-row">
+                <span class="label">${sanitizar(g.nombre)}</span>
+                <span style="font-size:12px;color:var(--texto-suave)">${sanitizar(g.dia_reunion || 'Sin día')} ${sanitizar(g.hora_reunion || '')}</span>
+              </div>
+            `).join('')
+          }
+        </div>
+
+        <div class="info-section">
+          <h3>Eventos (local)</h3>
+          <button class="btn-primary" style="margin-top:0;margin-bottom:12px" onclick="agregarEventoLocal()">+ Agregar evento</button>
+          ${eventos.length === 0 ?
+            '<div class="info-row"><span class="label">No hay eventos</span></div>' :
+            eventos.map(e => `
+              <div class="info-row">
+                <span class="label">${sanitizar(e.titulo || 'Evento')}</span>
+                <span style="font-size:12px;color:var(--texto-suave)">${sanitizar(e.fecha || '')} ${sanitizar(e.hora || '')}</span>
+              </div>
+              <button class="btn-secondary" style="margin-top:8px" onclick="eliminarEventoLocal('${sanitizar(e.id)}')">Eliminar</button>
+            `).join('')
+          }
         </div>
       </div>
     `;
     }
+
+    window.agregarEventoLocal = function () {
+      const titulo = prompt('Título del evento:');
+      if (!titulo) return;
+      const fecha = prompt('Fecha (YYYY-MM-DD):');
+      if (!fecha) return;
+      const hora = prompt('Hora (opcional, ej: 19:30):') || '';
+
+      let eventos = [];
+      try {
+        eventos = JSON.parse(localStorage.getItem('pastoreo_cal_events') || '[]');
+        if (!Array.isArray(eventos)) eventos = [];
+      } catch {
+        eventos = [];
+      }
+
+      eventos.unshift({ id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()), titulo, fecha, hora });
+      localStorage.setItem('pastoreo_cal_events', JSON.stringify(eventos));
+      render();
+    };
+
+    window.eliminarEventoLocal = function (eventId) {
+      let eventos = [];
+      try {
+        eventos = JSON.parse(localStorage.getItem('pastoreo_cal_events') || '[]');
+        if (!Array.isArray(eventos)) eventos = [];
+      } catch {
+        eventos = [];
+      }
+      eventos = eventos.filter(e => e?.id !== eventId);
+      localStorage.setItem('pastoreo_cal_events', JSON.stringify(eventos));
+      render();
+    };
 
     function renderPastorAlertas() {
       return `
@@ -1829,18 +1969,31 @@ async function cargarDatosPastor() {
 
       const userId = state.usuario.id;
 
-      const { data: misCuidados } = await sb.from('congregantes')
-        .select('*')
-        .eq('nangareko_id', userId)
-        .order('created_at', { ascending: false });
-      state.misCuidados = misCuidados || [];
+      const [
+        misCuidadosRes,
+        nuevosSinAsignarRes,
+        gruposRes
+      ] = await Promise.all([
+        sb.from('congregantes')
+          .select('*')
+          .eq('nangareko_id', userId)
+          .order('created_at', { ascending: false }),
+        sb.from('congregantes')
+          .select('*')
+          .is('nangareko_id', null)
+          .eq('estado', 'nuevo')
+          .order('created_at', { ascending: false }),
+        sb.from('grupos_dc').select('id, nombre').order('nombre', { ascending: true })
+      ]);
 
-      const { data: nuevosSinAsignar } = await sb.from('congregantes')
-        .select('*')
-        .is('nangareko_id', null)
-        .eq('estado', 'nuevo')
-        .order('created_at', { ascending: false });
-      state.alertasNuevos = nuevosSinAsignar || [];
+      state.misCuidados = misCuidadosRes?.data || [];
+      state.alertasNuevos = nuevosSinAsignarRes?.data || [];
+
+      if (gruposRes?.error) {
+        console.error('Error al cargar grupos DC (Ñangareko):', gruposRes.error);
+      } else {
+        state.gruposDC = gruposRes.data || [];
+      }
 
       const fechaLimite = new Date();
       fechaLimite.setDate(fechaLimite.getDate() - 7);
@@ -1988,6 +2141,11 @@ async function cargarDatosPastor() {
       const targetId = congreganteId || state.congreganteSeleccionado?.id;
       const targetNombre = congreganteNombre || state.congreganteSeleccionado?.nombre;
 
+      const grupos = state.gruposDC || [];
+      const congregante = targetId ?
+        ((state.misCuidados || []).find(c => c.id === targetId) || (state.congregantes || []).find(c => c.id === targetId)) :
+        null;
+
       if (!targetId) {
         const cuidados = state.misCuidados || [];
         return `
@@ -2018,6 +2176,30 @@ async function cargarDatosPastor() {
         <div class="section-header">
           <h3>📋 Contacto con: ${targetNombre}</h3>
           <button class="btn-back" onclick="cambiarPantalla('nangareko-fichas')">← Volver</button>
+        </div>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <h3>Datos</h3>
+          <div class="info-row">
+            <span class="label">Estado</span>
+            <select style="width:200px" onchange="actualizarEstadoCongregante('${targetId}', this.value)">
+              <option value="nuevo" ${(congregante?.estado || 'nuevo') === 'nuevo' ? 'selected' : ''}>${estadoLabel('nuevo')}</option>
+              <option value="visita" ${(congregante?.estado || '') === 'visita' ? 'selected' : ''}>${estadoLabel('visita')}</option>
+              <option value="en_proceso" ${(congregante?.estado || '') === 'en_proceso' ? 'selected' : ''}>${estadoLabel('en_proceso')}</option>
+              <option value="en_anua" ${(congregante?.estado || '') === 'en_anua' ? 'selected' : ''}>${estadoLabel('en_anua')}</option>
+              <option value="bautizado" ${(congregante?.estado || '') === 'bautizado' ? 'selected' : ''}>${estadoLabel('bautizado')}</option>
+              <option value="en_dc" ${(congregante?.estado || '') === 'en_dc' ? 'selected' : ''}>${estadoLabel('en_dc')}</option>
+              <option value="graduado" ${(congregante?.estado || '') === 'graduado' ? 'selected' : ''}>${estadoLabel('graduado')}</option>
+            </select>
+          </div>
+
+          <div class="info-row">
+            <span class="label">Grupo DC</span>
+            <select style="width:200px" onchange="actualizarGrupoDCCongregante('${targetId}', this.value)">
+              <option value="" ${!congregante?.grupo_dc_id ? 'selected' : ''}>(Sin grupo)</option>
+              ${grupos.map(g => `<option value="${g.id}" ${congregante?.grupo_dc_id === g.id ? 'selected' : ''}>${sanitizar(g.nombre)}</option>`).join('')}
+            </select>
+          </div>
         </div>
         
         <div class="nuevo-form">
