@@ -896,6 +896,7 @@
       asistenciasPorServicio: { domingo: {}, miercoles: {} },
       busqueda: '',
       fotoNuevo: null,
+      fotoEdicion: null,
       stats: { total: 0, presentes: 0, nuevos: 0 },
       // Pastor
       lideres: [],
@@ -1100,6 +1101,15 @@
       }
     };
 
+    window.logout = async function () {
+      try {
+        await withTimeout(sb.auth.signOut(), 12000, 'cerrar sesión');
+      } catch (e) {
+        console.error('Error al cerrar sesión:', e);
+        mostrarToast('⚠️ No se pudo cerrar sesión', 'error');
+      }
+    };
+
     window.irA = function (pantalla) {
       alert('Esta sección estará disponible próximamente 🚀\n\n→ ' + pantalla);
     };
@@ -1205,7 +1215,7 @@
         <div class="header-user">
           <div class="user-avatar">${sanitizar(iniciales || '?')}</div>
           <span class="rol-badge rol-${u.rol}">${rolLabel}</span>
-          <button class="btn-logout" id="btn-logout">Salir</button>
+          <button class="btn-logout" id="btn-logout" onclick="logout()">Salir</button>
         </div>
       </div>`;
     }
@@ -1679,7 +1689,29 @@ async function cargarDatosPastor() {
     };
 
     window.asignarLiderGrupo = async function (grupoId) {
-      const lideres = state.lideres?.filter(l => l.rol === 'lider_dc') || [];
+      let lideres = state.lideres || [];
+      lideres = lideres.filter(l => {
+        const rol = String(l.rol || '').toLowerCase();
+        return rol === 'lider_dc' || rol === 'liderdc' || rol === 'lider dc';
+      });
+
+      // Si todavía no hay, recargar desde DB (puede que state.lideres esté vacío/stale)
+      if (lideres.length === 0) {
+        try {
+          const { data, error } = await withTimeout(
+            sb.from('usuarios').select('id, nombre, email, rol').eq('rol', 'lider_dc').order('nombre', { ascending: true }),
+            12000,
+            'cargar líderes dc'
+          );
+          if (error) throw error;
+          lideres = data || [];
+        } catch (e) {
+          console.error('Error al cargar líderes DC:', e);
+          mostrarToast('⚠️ No se pudieron cargar líderes DC', 'error');
+          return;
+        }
+      }
+
       if (lideres.length === 0) {
         mostrarToast('No hay líderes DC registrados', 'error');
         return;
@@ -2185,6 +2217,24 @@ async function cargarDatosPastor() {
 
         <div class="info-section" style="margin-bottom:12px">
           <h3>Datos</h3>
+          <div class="input-group" style="margin-bottom:12px">
+            <label>Nombre</label>
+            <input type="text" id="edit-nombre" value="${sanitizar(congregante?.nombre || targetNombre || '')}" />
+          </div>
+
+          <div class="input-group" style="margin-bottom:12px">
+            <label>Teléfono</label>
+            <input type="tel" id="edit-telefono" value="${sanitizar(congregante?.telefono || '')}" placeholder="0981 000 000" />
+          </div>
+
+          <div style="text-align:center;margin-bottom:12px">
+            <div class="foto-upload" onclick="document.getElementById('edit-foto-input').click()">
+              <div id="edit-foto-preview">${congregante?.foto_url ? `<img src=\"${congregante.foto_url}\" alt=\"foto\" style=\"width:100%;height:100%;object-fit:cover;border-radius:12px\" />` : '📷'}</div>
+              <span>Foto (opcional)</span>
+            </div>
+            <input type="file" id="edit-foto-input" accept="image/*" style="display:none" onchange="previsualizarFotoEdicion(this)" />
+          </div>
+
           <div class="info-row">
             <span class="label">Estado</span>
             <select style="width:200px" onchange="actualizarEstadoCongregante('${targetId}', this.value)">
@@ -2205,6 +2255,8 @@ async function cargarDatosPastor() {
               ${grupos.map(g => `<option value="${g.id}" ${congregante?.grupo_dc_id === g.id ? 'selected' : ''}>${sanitizar(g.nombre)}</option>`).join('')}
             </select>
           </div>
+
+          <button class="btn-primary" style="margin-top:12px" onclick="guardarPerfilCongregante('${targetId}')">💾 Guardar datos</button>
         </div>
         
         <div class="nuevo-form">
@@ -3087,6 +3139,55 @@ async function cargarDatosPastor() {
           if (btn) btn.querySelector('span').textContent = 'Cambiar foto';
         };
         reader.readAsDataURL(input.files[0]);
+      }
+    };
+
+    window.previsualizarFotoEdicion = function (input) {
+      if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = e => {
+          state.fotoEdicion = e.target.result;
+          const preview = document.getElementById('edit-foto-preview');
+          if (preview) preview.innerHTML = `<img src="${e.target.result}" alt="foto" style="width:100%;height:100%;object-fit:cover;border-radius:12px" />`;
+        };
+        reader.readAsDataURL(input.files[0]);
+      }
+    };
+
+    window.guardarPerfilCongregante = async function (congreganteId) {
+      const nombre = document.getElementById('edit-nombre')?.value?.trim();
+      const telefono = document.getElementById('edit-telefono')?.value?.trim();
+
+      if (!nombre) {
+        mostrarToast('⚠️ El nombre es obligatorio', 'error');
+        return;
+      }
+
+      const update = {
+        nombre,
+        telefono: telefono || null
+      };
+
+      if (state.fotoEdicion) update.foto_url = state.fotoEdicion;
+
+      try {
+        const { error } = await withTimeout(
+          sb.from('congregantes').update(update).eq('id', congreganteId),
+          12000,
+          'guardar perfil congregante'
+        );
+        if (error) throw error;
+
+        actualizarCongreganteEnColecciones(congreganteId, update);
+        state.fotoEdicion = null;
+        mostrarToast('✅ Datos actualizados');
+        render();
+      } catch (e) {
+        console.error('Error al guardar perfil congregante:', e);
+        mostrarToast('⚠️ No se pudo guardar: ' + (e?.message || 'sin detalle'), 'error');
+        await cargarCongregantes();
+        if (state.usuario?.rol === 'nangareko') await cargarDatosNangareko();
+        render();
       }
     };
 
