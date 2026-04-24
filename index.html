@@ -1749,7 +1749,7 @@ async function cargarDatosPastor() {
         render();
       } catch (e) {
         console.error('Error al actualizar estado:', e);
-        mostrarToast('⚠️ No se pudo actualizar el estado', 'error');
+        mostrarToast('⚠️ No se pudo actualizar el estado: ' + (e?.message || 'sin detalle'), 'error');
         await cargarCongregantes();
         render();
       }
@@ -1770,10 +1770,15 @@ async function cargarDatosPastor() {
         render();
       } catch (e) {
         console.error('Error al actualizar grupo dc:', e);
-        mostrarToast('⚠️ No se pudo actualizar el grupo DC', 'error');
+        mostrarToast('⚠️ No se pudo actualizar el grupo DC: ' + (e?.message || 'sin detalle'), 'error');
         await cargarCongregantes();
         render();
       }
+    };
+
+    window.volverNangarekoSeleccion = function () {
+      state.congreganteSeleccionado = null;
+      render();
     };
 
     window.actualizarRolUsuario = async function (usuarioId, nuevoRol) {
@@ -2175,7 +2180,7 @@ async function cargarDatosPastor() {
       <div class="main-content">
         <div class="section-header">
           <h3>📋 Contacto con: ${targetNombre}</h3>
-          <button class="btn-back" onclick="cambiarPantalla('nangareko-fichas')">← Volver</button>
+          <button class="btn-back" onclick="volverNangarekoSeleccion()">← Volver</button>
         </div>
 
         <div class="info-section" style="margin-bottom:12px">
