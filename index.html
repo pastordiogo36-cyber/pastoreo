@@ -840,6 +840,8 @@
 
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    let realtimeChannels = [];
+
     let state = {
       loading: true,
       session: null,
@@ -920,9 +922,18 @@
     }
 
     // Supabase Realtime Listener (for Ñangareko new alerts)
+    function cleanupRealtimeListeners() {
+      (realtimeChannels || []).forEach((ch) => {
+        try { sb.removeChannel(ch); } catch (e) { /* noop */ }
+      });
+      realtimeChannels = [];
+    }
+
     function setupRealtimeListeners() {
+      cleanupRealtimeListeners();
+
       // Suscripción a la tabla 'congregantes' para notificar nuevos ingresos
-      sb.channel('alertas-nuevos')
+      const alertasNuevosChannel = sb.channel('alertas-nuevos')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'congregantes' }, async (payload) => {
           const nuevoCongregante = payload.new;
 
@@ -932,16 +943,40 @@
 
             // 2. Si el usuario actual es un Ñangareko, actualiza su lista de alertas
             if (state.usuario?.rol === 'nangareko') {
-              // Si el Ñangareko está en la pantalla de inicio o alertas, actualiza el estado y re-renderiza
-              if (state.pantalla === 'home' || state.pantalla === 'nangareko-alertas') {
-                await cargarDatosNangareko();
-                mostrarToast(`🚨 ¡Nuevo ingreso! ${nuevoCongregante.nombre}`);
-                render();
-              }
+              await cargarDatosNangareko();
+              mostrarToast(`🚨 ¡Nuevo ingreso! ${nuevoCongregante.nombre}`);
+              render();
             }
           }
         })
         .subscribe();
+
+      // Suscripción general para mantener listas actualizadas (Hory / Pastor / Ñangareko / Líder DC)
+      // Nota: esto depende de Realtime habilitado en Supabase para la tabla y de que RLS permita ver filas.
+      const congregantesSyncChannel = sb.channel('congregantes-sync')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'congregantes' }, async () => {
+          // Actualiza caches principales
+          await cargarCongregantes();
+
+          // Actualiza datos dependientes por rol
+          if (state.usuario?.rol === 'nangareko') {
+            await cargarDatosNangareko();
+          }
+          if (state.usuario?.rol === 'pastor') {
+            await cargarDatosPastor();
+          }
+          if (state.usuario?.rol === 'lider_dc') {
+            await cargarDatosLiderDC();
+          }
+
+          // Re-render solo si la app está en una pantalla que usa esos datos
+          if (['asistencia', 'home', 'nangareko-alertas', 'nangareko-cuidados', 'lider-dc-asistencia'].includes(state.pantalla)) {
+            render();
+          }
+        })
+        .subscribe();
+
+      realtimeChannels.push(alertasNuevosChannel, congregantesSyncChannel);
     }
 
     // ============================================
@@ -2627,16 +2662,26 @@ async function cargarDatosPastor() {
     };
 
     async function cargarCongregantes() {
-      const { data } = await sb.from('congregantes').select('*').order('nombre');
+      const { data, error } = await sb.from('congregantes').select('*').order('nombre');
+      if (error) {
+        console.error('Error al cargar congregantes:', error);
+        mostrarToast('⚠️ No se pudieron cargar los congregantes (ver permisos/RLS)', 'error');
+        state.congregantes = [];
+        return;
+      }
       state.congregantes = data || [];
     }
 
     async function cargarAsistenciasHoy() {
       const hoy = new Date().toISOString().split('T')[0];
-      const { data } = await sb.from('asistencias')
+      const { data, error } = await sb.from('asistencias')
         .select('congregante_id, presente')
         .eq('tipo_servicio', state.servicioActivo)
         .eq('fecha', hoy);
+      if (error) {
+        console.error('Error al cargar asistencias:', error);
+        mostrarToast('⚠️ No se pudieron cargar asistencias (ver permisos/RLS)', 'error');
+      }
       state.asistenciasHoy = {};
       (data || []).forEach(a => { state.asistenciasHoy[a.congregante_id] = a.presente; });
     }
@@ -2675,7 +2720,13 @@ async function cargarDatosPastor() {
 
       sb.auth.onAuthStateChange(async (event, session) => {
         state.session = session;
-        if (session) { await cargarUsuario(); } else { state.usuario = null; }
+        if (session) {
+          await cargarUsuario();
+          setupRealtimeListeners();
+        } else {
+          state.usuario = null;
+          cleanupRealtimeListeners();
+        }
         render();
       });
     }
