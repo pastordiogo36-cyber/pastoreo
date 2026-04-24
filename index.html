@@ -841,6 +841,8 @@
     const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     let realtimeChannels = [];
+    let realtimeRefreshTimer = null;
+    let realtimeRefreshInFlight = false;
 
     let state = {
       loading: true,
@@ -850,6 +852,7 @@
       servicioActivo: 'domingo',
       congregantes: [],
       asistenciasHoy: {},
+      asistenciasPorServicio: { domingo: {}, miercoles: {} },
       busqueda: '',
       fotoNuevo: null,
       stats: { total: 0, presentes: 0, nuevos: 0 },
@@ -955,24 +958,28 @@
       // Nota: esto depende de Realtime habilitado en Supabase para la tabla y de que RLS permita ver filas.
       const congregantesSyncChannel = sb.channel('congregantes-sync')
         .on('postgres_changes', { event: '*', schema: 'public', table: 'congregantes' }, async () => {
-          // Actualiza caches principales
-          await cargarCongregantes();
-
-          // Actualiza datos dependientes por rol
-          if (state.usuario?.rol === 'nangareko') {
-            await cargarDatosNangareko();
-          }
-          if (state.usuario?.rol === 'pastor') {
-            await cargarDatosPastor();
-          }
-          if (state.usuario?.rol === 'lider_dc') {
-            await cargarDatosLiderDC();
-          }
-
-          // Re-render solo si la app está en una pantalla que usa esos datos
-          if (['asistencia', 'home', 'nangareko-alertas', 'nangareko-cuidados', 'lider-dc-asistencia'].includes(state.pantalla)) {
-            render();
-          }
+          if (realtimeRefreshTimer) clearTimeout(realtimeRefreshTimer);
+          realtimeRefreshTimer = setTimeout(async () => {
+            if (realtimeRefreshInFlight) return;
+            realtimeRefreshInFlight = true;
+            try {
+              await cargarCongregantes();
+              if (state.usuario?.rol === 'nangareko') {
+                await cargarDatosNangareko();
+              }
+              if (state.usuario?.rol === 'pastor') {
+                await cargarDatosPastor();
+              }
+              if (state.usuario?.rol === 'lider_dc') {
+                await cargarDatosLiderDC();
+              }
+              if (['asistencia', 'home', 'nangareko-alertas', 'nangareko-cuidados', 'lider-dc-asistencia'].includes(state.pantalla)) {
+                render();
+              }
+            } finally {
+              realtimeRefreshInFlight = false;
+            }
+          }, 500);
         })
         .subscribe();
 
@@ -1010,7 +1017,12 @@
       // 3. Cargar datos específicos de la nueva pantalla
       if (pantalla === 'asistencia') {
         await cargarCongregantes();
-        await cargarAsistenciasHoy();
+        const cache = state.asistenciasPorServicio?.[state.servicioActivo];
+        if (cache && Object.keys(cache).length > 0) {
+          state.asistenciasHoy = { ...cache };
+        } else {
+          await cargarAsistenciasHoy();
+        }
       }
       if (pantalla === 'home') {
         if (state.usuario?.rol === 'pastor') await cargarDatosPastor();
@@ -1133,43 +1145,58 @@
       const btnGuardar = document.getElementById('btn-guardar-nuevo');
       if (btnGuardar) {
         btnGuardar.addEventListener('click', async () => {
-          const nombre = document.getElementById('nuevo-nombre')?.value.trim();
-          const telefono = document.getElementById('nuevo-telefono')?.value.trim();
           const err = document.getElementById('nuevo-error');
           const exito = document.getElementById('nuevo-exito');
-          if (!nombre) { err.style.display = 'block'; err.textContent = 'El nombre es obligatorio.'; return; }
-          btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
-          err.style.display = 'none';
+          try {
+            const nombre = document.getElementById('nuevo-nombre')?.value.trim();
+            const telefono = document.getElementById('nuevo-telefono')?.value.trim();
+            if (!nombre) { err.style.display = 'block'; err.textContent = 'El nombre es obligatorio.'; return; }
+            btnGuardar.disabled = true; btnGuardar.textContent = 'Guardando...';
+            err.style.display = 'none';
 
-          const { data: nuevo, error } = await sb.from('congregantes').insert({
-            nombre, telefono: telefono || null, estado: 'nuevo'
-          }).select().single();
+            const { data: nuevo, error } = await sb.from('congregantes').insert({
+              nombre, telefono: telefono || null, estado: 'nuevo'
+            }).select().single();
 
-          if (error) {
-            err.style.display = 'block'; err.textContent = 'Error al guardar: ' + error.message;
-            btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
-            return;
+            if (error) {
+              err.style.display = 'block'; err.textContent = 'Error al guardar: ' + error.message;
+              return;
+            }
+
+            // Notificación a Ñangarekos (si la política de usuarios lo permite)
+            const { data: nangarekos, error: errNang } = await sb.from('usuarios').select('id').eq('rol', 'nangareko');
+            if (!errNang && nangarekos && nangarekos.length > 0) {
+              const alertas = nangarekos.map(n => ({
+                usuario_id: n.id,
+                congregante_id: nuevo.id,
+                tipo: 'nuevo_ingreso',
+                mensaje: `${nombre} ingresó por primera vez`
+              }));
+              const { error: errAlertas } = await sb.from('alertas').insert(alertas);
+              if (errAlertas) console.error('Error al crear alertas:', errAlertas);
+            }
+
+            await cargarCongregantes();
+            if (exito) {
+              exito.style.display = 'block';
+              exito.textContent = `✅ ${nombre} registrado correctamente.`;
+            }
+            const nombreInput = document.getElementById('nuevo-nombre');
+            const telefonoInput = document.getElementById('nuevo-telefono');
+            if (nombreInput) nombreInput.value = '';
+            if (telefonoInput) telefonoInput.value = '';
+            state.fotoNuevo = null;
+            mostrarToast(`✨ ${nombre} registrado!`);
+          } catch (e) {
+            console.error('Error inesperado en nuevo ingreso:', e);
+            if (err) {
+              err.style.display = 'block';
+              err.textContent = 'Ocurrió un error inesperado. Probá de nuevo.';
+            }
+          } finally {
+            btnGuardar.disabled = false;
+            btnGuardar.textContent = 'Registrar nuevo ingreso';
           }
-
-          const { data: nangarekos } = await sb.from('usuarios').select('id').eq('rol', 'nangareko');
-          if (nangarekos && nangarekos.length > 0) {
-            const alertas = nangarekos.map(n => ({
-              usuario_id: n.id,
-              congregante_id: nuevo.id,
-              tipo: 'nuevo_ingreso',
-              mensaje: `${nombre} ingresó por primera vez`
-            }));
-            await sb.from('alertas').insert(alertas);
-          }
-
-          await cargarCongregantes();
-          exito.style.display = 'block';
-          exito.textContent = `✅ ${nombre} registrado correctamente. Se notificó a los Ñangarekos.`;
-          document.getElementById('nuevo-nombre').value = '';
-          document.getElementById('nuevo-telefono').value = '';
-          state.fotoNuevo = null;
-          btnGuardar.disabled = false; btnGuardar.textContent = 'Registrar nuevo ingreso';
-          mostrarToast(`✨ ${nombre} registrado!`);
         });
       }
     }
@@ -1305,43 +1332,45 @@ async function cargarDatosPastor() {
     fechaLimite.setDate(fechaLimite.getDate() - 7);
     const fechaStr = fechaLimite.toISOString().split('T')[0];
 
-    // ATENCIÓN: Esta consulta de líderes puede fallar si RLS está activo
-    // y no hay una política específica que permita al pastor leer a todos.
-    // Si la política de RLS de Pastor (pastores leen todos) causa recursión,
-    // es mejor eliminar esta consulta y obtener la información de líderes
-    // de forma indirecta (no implementado aquí, pero es la razón por la que
-    // RLS es complicado).
+    const [
+      congregantesRes,
+      nuevosRes,
+      asistDomRes,
+      asistMieRes,
+      ultimosRes,
+      alertasRes,
+      gruposRes
+    ] = await Promise.all([
+      sb.from('congregantes').select('*'),
+      sb.from('congregantes').select('id', { count: 'exact' }).gte('created_at', fechaStr),
+      sb.from('asistencias').select('presente').eq('tipo_servicio', 'domingo').gte('fecha', fechaStr),
+      sb.from('asistencias').select('presente').eq('tipo_servicio', 'miercoles').gte('fecha', fechaStr),
+      sb.from('congregantes').select('nombre, created_at').order('created_at', { ascending: false }).limit(5),
+      sb.from('alertas').select('tipo, mensaje, created_at').order('created_at', { ascending: false }).limit(5),
+      sb.from('grupos_dc').select('*, lider:lider_id(nombre)').order('created_at', { ascending: false })
+    ]);
 
-    // --- Versión simplificada para evitar recursión ---
-    // En lugar de obtener todos los líderes aquí, nos centraremos en los datos
-    // de la congregación, que sí permitiremos ver al Pastor a través de RLS en otras tablas.
-    // Si la lista de líderes es crucial, tendríamos que re-implementar RLS
-    // de manera diferente o permitir que el pastor lea todos los usuarios.
+    if (congregantesRes.error) {
+      console.error('Error al cargar congregantes (Pastor):', congregantesRes.error);
+      mostrarToast('⚠️ No se pudieron cargar congregantes (ver permisos/RLS)', 'error');
+      state.congregantes = [];
+    } else {
+      state.congregantes = congregantesRes.data || [];
+    }
 
-    // 1. Obtener datos de congregantes
-    // (Asegúrate que RLS en tabla congregantes permite leer a pastores)
-    const { data: congregantesData } = await sb.from('congregantes').select('*');
-    state.congregantes = congregantesData || [];
-    const totalCongregantes = state.congregantes.length;
+    if (nuevosRes.error) {
+      console.error('Error al cargar nuevos (Pastor):', nuevosRes.error);
+      state.nuevosUltimaSemana = 0;
+    } else {
+      state.nuevosUltimaSemana = nuevosRes.data?.length || 0;
+    }
 
-    // 2. Obtener estadísticas de nuevos (últimos 7 días)
-    const { data: nuevos } = await sb.from('congregantes')
-      .select('id', { count: 'exact' })
-      .gte('created_at', fechaStr);
-    state.nuevosUltimaSemana = nuevos?.length || 0;
+    const asistenciasDomingo = asistDomRes.error ? [] : (asistDomRes.data || []);
+    const asistenciasMiercoles = asistMieRes.error ? [] : (asistMieRes.data || []);
+    if (asistDomRes.error) console.error('Error al cargar asistencias domingo (Pastor):', asistDomRes.error);
+    if (asistMieRes.error) console.error('Error al cargar asistencias miércoles (Pastor):', asistMieRes.error);
 
-    // 3. Obtener asistencias para el promedio (últimos 7 días)
-    const { data: asistenciasDomingo } = await sb.from('asistencias')
-      .select('presente')
-      .eq('tipo_servicio', 'domingo')
-      .gte('fecha', fechaStr);
-
-    const { data: asistenciasMiercoles } = await sb.from('asistencias')
-      .select('presente')
-      .eq('tipo_servicio', 'miercoles')
-      .gte('fecha', fechaStr);
-
-    const todasAsistencias = [...(asistenciasDomingo || []), ...(asistenciasMiercoles || [])];
+    const todasAsistencias = [...asistenciasDomingo, ...asistenciasMiercoles];
     if (todasAsistencias.length > 0) {
       const presentes = todasAsistencias.filter(a => a.presente).length;
       state.asistenciaPromedio = Math.round((presentes / todasAsistencias.length) * 100);
@@ -1349,25 +1378,26 @@ async function cargarDatosPastor() {
       state.asistenciaPromedio = 0;
     }
 
-    // 4. Obtener últimos ingresos
-    const { data: ultimos } = await sb.from('congregantes')
-      .select('nombre, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5);
-    state.ultimosCongregantes = ultimos || [];
+    if (ultimosRes.error) {
+      console.error('Error al cargar últimos ingresos (Pastor):', ultimosRes.error);
+      state.ultimosCongregantes = [];
+    } else {
+      state.ultimosCongregantes = ultimosRes.data || [];
+    }
 
-    // 5. Obtener alertas recientes (asegúrate que RLS en tabla alertas permite leer a pastores)
-    const { data: alertas } = await sb.from('alertas')
-      .select('tipo, mensaje, created_at')
-      .order('created_at', { ascending: false })
-      .limit(5);
-    state.alertasRecientes = alertas || [];
+    if (alertasRes.error) {
+      console.error('Error al cargar alertas (Pastor):', alertasRes.error);
+      state.alertasRecientes = [];
+    } else {
+      state.alertasRecientes = alertasRes.data || [];
+    }
 
-    // 6. Obtener grupos DC (asegúrate que RLS en tabla grupos_dc permite leer a pastores)
-    const { data: grupos } = await sb.from('grupos_dc')
-      .select('*, lider:lider_id(nombre)')
-      .order('created_at', { ascending: false });
-    state.gruposDC = grupos || [];
+    if (gruposRes.error) {
+      console.error('Error al cargar grupos DC (Pastor):', gruposRes.error);
+      state.gruposDC = [];
+    } else {
+      state.gruposDC = gruposRes.data || [];
+    }
 
     setTimeout(() => dibujarGraficoAsistencia(), 100);
 }
@@ -2422,6 +2452,7 @@ async function cargarDatosPastor() {
         c.nombre.toLowerCase().includes(state.busqueda.toLowerCase())
       );
       const presentes = Object.values(state.asistenciasHoy).filter(Boolean).length;
+      const esHory = state.usuario?.rol === 'hory';
 
       return `
       <div class="section-header">
@@ -2476,7 +2507,7 @@ async function cargarDatosPastor() {
                   </div>
                   <div>
                     <div class="congregante-nombre">${c.nombre}</div>
-                    <div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>
+                    ${esHory ? '' : `<div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>`}
                   </div>
                 </div>
                 <label class="switch">
@@ -2529,8 +2560,17 @@ async function cargarDatosPastor() {
 
     // Function to handle changing service in attendance screen
     window.cambiarServicio = async function (servicio) {
+      // Guardar antes de cambiar, para no perder el trabajo si el Hory navega entre pantallas/servicios
+      await guardarAsistencias();
+
       state.servicioActivo = servicio;
-      await cargarAsistenciasHoy();
+      // Si ya tenemos cache local del servicio, úsalo; si no, carga desde DB
+      const cache = state.asistenciasPorServicio?.[servicio];
+      if (cache && Object.keys(cache).length > 0) {
+        state.asistenciasHoy = { ...cache };
+      } else {
+        await cargarAsistenciasHoy();
+      }
       filtrarBusqueda(state.busqueda); // Re-render list with updated attendance data
 
       // Update service buttons UI
@@ -2558,6 +2598,8 @@ async function cargarDatosPastor() {
       const lista = document.getElementById('lista-congregantes');
       if (!lista) return;
 
+      const esHory = state.usuario?.rol === 'hory';
+
       const filtrados = state.congregantes.filter(c =>
         c.nombre.toLowerCase().includes(valor.toLowerCase())
       );
@@ -2573,7 +2615,7 @@ async function cargarDatosPastor() {
             <div class="congregante-foto">${c.foto_url ? `<img src="${c.foto_url}" />` : sanitizar(iniciales)}</div>
             <div>
               <div class="congregante-nombre">${sanitizar(c.nombre)}</div>
-              <div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>
+              ${esHory ? '' : `<div class="congregante-estado estado-${c.estado}">${estadoLabel(c.estado)}</div>`}
             </div>
           </div>
           <label class="switch">
@@ -2595,6 +2637,9 @@ async function cargarDatosPastor() {
      */
     window.toggleAsistencia = function (congreganteId, presente) {
       state.asistenciasHoy[congreganteId] = presente;
+      if (!state.asistenciasPorServicio) state.asistenciasPorServicio = { domingo: {}, miercoles: {} };
+      if (!state.asistenciasPorServicio[state.servicioActivo]) state.asistenciasPorServicio[state.servicioActivo] = {};
+      state.asistenciasPorServicio[state.servicioActivo][congreganteId] = presente;
 
       const item = document.getElementById('item-' + congreganteId);
       if (item) {
@@ -2641,10 +2686,12 @@ async function cargarDatosPastor() {
 
       if (error) {
         console.error('Error al guardar asistencias:', error);
-        mostrarToast('⚠️ Error al guardar asistencias', 'error');
-      } else {
-        mostrarToast('✅ Asistencias guardadas correctamente');
+        mostrarToast('⚠️ No se pudieron guardar las asistencias', 'error');
+        return;
       }
+
+      if (!state.asistenciasPorServicio) state.asistenciasPorServicio = { domingo: {}, miercoles: {} };
+      state.asistenciasPorServicio[state.servicioActivo] = { ...state.asistenciasHoy };
     };
 
     window.previsualizarFoto = function (input) {
@@ -2684,6 +2731,8 @@ async function cargarDatosPastor() {
       }
       state.asistenciasHoy = {};
       (data || []).forEach(a => { state.asistenciasHoy[a.congregante_id] = a.presente; });
+      if (!state.asistenciasPorServicio) state.asistenciasPorServicio = { domingo: {}, miercoles: {} };
+      state.asistenciasPorServicio[state.servicioActivo] = { ...state.asistenciasHoy };
     }
 
     async function cargarStatsHory() {
@@ -2713,6 +2762,11 @@ async function cargarDatosPastor() {
       if (session) {
         await cargarUsuario();
         setupRealtimeListeners();
+
+        if (state.usuario?.rol === 'pastor') await cargarDatosPastor();
+        if (state.usuario?.rol === 'nangareko') await cargarDatosNangareko();
+        if (state.usuario?.rol === 'lider_dc') await cargarDatosLiderDC();
+        if (state.usuario?.rol === 'hory') await cargarStatsHory();
       }
 
       state.loading = false;
@@ -2723,6 +2777,11 @@ async function cargarDatosPastor() {
         if (session) {
           await cargarUsuario();
           setupRealtimeListeners();
+
+          if (state.usuario?.rol === 'pastor') await cargarDatosPastor();
+          if (state.usuario?.rol === 'nangareko') await cargarDatosNangareko();
+          if (state.usuario?.rol === 'lider_dc') await cargarDatosLiderDC();
+          if (state.usuario?.rol === 'hory') await cargarStatsHory();
         } else {
           state.usuario = null;
           cleanupRealtimeListeners();
