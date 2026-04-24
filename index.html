@@ -256,6 +256,28 @@
       font-weight: 700;
     }
 
+    .header-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .user-avatar {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      color: var(--blanco);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      user-select: none;
+    }
+
     .rol-badge {
       font-size: 11px;
       letter-spacing: 1.5px;
@@ -1166,13 +1188,22 @@
     function renderHeader() {
       const u = state.usuario;
       const rolLabel = { pastor: 'Pastor', hory: 'Hory', nangareko: 'Ñangareko', lider_dc: 'Líder DC' }[u.rol];
+      const iniciales = (u?.nombre || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map(p => p[0])
+        .join('')
+        .toUpperCase();
       return `
       <div class="app-header">
         <div class="header-left">
           <div class="header-icon"><img src="Logo de Redencion .png" alt="Logo" /></div>
           <div class="header-title">Pastoreo</div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
+        <div class="header-user">
+          <div class="user-avatar">${sanitizar(iniciales || '?')}</div>
           <span class="rol-badge rol-${u.rol}">${rolLabel}</span>
           <button class="btn-logout" id="btn-logout">Salir</button>
         </div>
@@ -1494,17 +1525,68 @@ async function cargarDatosPastor() {
     }
 
     function renderPastorCongregacion() {
+      const grupos = state.gruposDC || [];
+      const estadoOpciones = [
+        { value: 'nuevo', label: estadoLabel('nuevo') },
+        { value: 'visita', label: estadoLabel('visita') },
+        { value: 'en_proceso', label: estadoLabel('en_proceso') },
+        { value: 'en_anua', label: estadoLabel('en_anua') },
+        { value: 'bautizado', label: estadoLabel('bautizado') },
+        { value: 'en_dc', label: estadoLabel('en_dc') },
+        { value: 'graduado', label: estadoLabel('graduado') }
+      ];
+
+      const busq = (state.pastorCongregacionBusqueda || '').toLowerCase();
+      const lista = (state.congregantes || []).filter(c => {
+        if (!busq) return true;
+        return (c.nombre || '').toLowerCase().includes(busq);
+      });
+
       return `
       <div class="main-content">
         <div class="section-header">
           <h3>🏛️ Congregación</h3>
           <button class="btn-back" onclick="cambiarPantalla('home')">← Volver</button>
         </div>
-        <div class="coming-soon">
-          <div class="big-icon">🚧</div>
-          <h3>Próximamente</h3>
-          <p>Lista completa de congregantes</p>
+
+        <div class="input-group" style="margin-bottom:12px">
+          <label>Buscar</label>
+          <input type="text" placeholder="Escribí un nombre..." value="${sanitizar(state.pastorCongregacionBusqueda || '')}" oninput="actualizarBusquedaCongregacion(this.value)" />
         </div>
+
+        ${lista.length === 0 ?
+          `<div style="text-align:center;color:var(--texto-suave);padding:32px;font-size:14px">No se encontraron resultados.</div>` :
+          lista.map(c => {
+            const grupoActual = c.grupo_dc_id ? grupos.find(g => g.id === c.grupo_dc_id) : null;
+            return `
+              <div class="info-section" style="margin-bottom:12px">
+                <div class="info-row">
+                  <span class="label">${sanitizar(c.nombre)}</span>
+                  <span class="estado-${c.estado}">${estadoLabel(c.estado)}</span>
+                </div>
+
+                <div class="info-row">
+                  <span class="label">Estado</span>
+                  <select style="width:200px" onchange="actualizarEstadoCongregante('${c.id}', this.value)">
+                    ${estadoOpciones.map(o => `<option value="${o.value}" ${c.estado === o.value ? 'selected' : ''}>${o.label}</option>`).join('')}
+                  </select>
+                </div>
+
+                <div class="info-row">
+                  <span class="label">Grupo DC</span>
+                  <select style="width:200px" onchange="actualizarGrupoDCCongregante('${c.id}', this.value)">
+                    <option value="">(Sin grupo)</option>
+                    ${grupos.map(g => `<option value="${g.id}" ${c.grupo_dc_id === g.id ? 'selected' : ''}>${sanitizar(g.nombre)}</option>`).join('')}
+                  </select>
+                </div>
+
+                <div class="info-row">
+                  <span class="label">Asignado</span>
+                  <span>${grupoActual ? sanitizar(grupoActual.nombre) : '—'}</span>
+                </div>
+              </div>`;
+          }).join('')
+        }
       </div>
     `;
     }
@@ -1596,6 +1678,54 @@ async function cargarDatosPastor() {
         await cargarCongregantes();
         await cargarDatosPastor();
         asignarMiembrosGrupo(grupoId, grupoNombre);
+      }
+    };
+
+    window.actualizarBusquedaCongregacion = function (valor) {
+      state.pastorCongregacionBusqueda = valor;
+      render();
+    };
+
+    window.actualizarEstadoCongregante = async function (congreganteId, nuevoEstado) {
+      try {
+        const { error } = await withTimeout(
+          sb.from('congregantes').update({ estado: nuevoEstado }).eq('id', congreganteId),
+          12000,
+          'actualizar estado'
+        );
+        if (error) throw error;
+
+        const idx = (state.congregantes || []).findIndex(c => c.id === congreganteId);
+        if (idx >= 0) state.congregantes[idx].estado = nuevoEstado;
+        mostrarToast('✅ Estado actualizado');
+        render();
+      } catch (e) {
+        console.error('Error al actualizar estado:', e);
+        mostrarToast('⚠️ No se pudo actualizar el estado', 'error');
+        await cargarCongregantes();
+        render();
+      }
+    };
+
+    window.actualizarGrupoDCCongregante = async function (congreganteId, grupoIdValue) {
+      const grupo_dc_id = grupoIdValue ? grupoIdValue : null;
+      try {
+        const { error } = await withTimeout(
+          sb.from('congregantes').update({ grupo_dc_id }).eq('id', congreganteId),
+          12000,
+          'actualizar grupo dc'
+        );
+        if (error) throw error;
+
+        const idx = (state.congregantes || []).findIndex(c => c.id === congreganteId);
+        if (idx >= 0) state.congregantes[idx].grupo_dc_id = grupo_dc_id;
+        mostrarToast('✅ Grupo DC actualizado');
+        render();
+      } catch (e) {
+        console.error('Error al actualizar grupo dc:', e);
+        mostrarToast('⚠️ No se pudo actualizar el grupo DC', 'error');
+        await cargarCongregantes();
+        render();
       }
     };
 
