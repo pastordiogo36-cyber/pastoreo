@@ -1248,7 +1248,6 @@
         <div class="header-user">
           <div class="user-avatar">${sanitizar(iniciales || '?')}</div>
           <span class="rol-badge rol-${u.rol}">${rolLabel}</span>
-          <button class="btn-logout" id="btn-notificaciones" onclick="activarNotificaciones()">Notificaciones</button>
           <button class="btn-logout" id="btn-logout" onclick="logout()">Salir</button>
         </div>
       </div>`;
@@ -1256,7 +1255,6 @@
 
     function bindApp() {
       document.getElementById('btn-logout')?.addEventListener('click', async () => { await sb.auth.signOut(); });
-      document.getElementById('btn-notificaciones')?.addEventListener('click', async () => { await window.activarNotificaciones?.(); });
 
       // Binding for Nuevo Ingreso screen logic
       const btnGuardar = document.getElementById('btn-guardar-nuevo');
@@ -3690,6 +3688,12 @@ async function cargarDatosPastor() {
 			});
 
 			try {
+				await OneSignal.User?.PushSubscription?.optIn?.();
+			} catch (e) {
+				console.error('Error al hacer opt-in en OneSignal:', e);
+			}
+
+			try {
 				const perm = await OneSignal.Notifications.permission;
 				if (perm !== 'granted') {
 					await OneSignal.Notifications.requestPermission();
@@ -3699,30 +3703,6 @@ async function cargarDatosPastor() {
 			}
 		});
 	  }
-
-	  window.activarNotificaciones = async function () {
-		try {
-			if (!window.OneSignal) {
-				mostrarToast('⚠️ OneSignal aún no está listo. Probá en 5 segundos.', 'error');
-				return;
-			}
-			const perm = await window.OneSignal.Notifications.permission;
-			if (perm === 'granted') {
-				mostrarToast('✅ Notificaciones ya activadas');
-				return;
-			}
-			await window.OneSignal.Notifications.requestPermission();
-			const perm2 = await window.OneSignal.Notifications.permission;
-			if (perm2 === 'granted') {
-				mostrarToast('✅ Notificaciones activadas');
-			} else {
-				mostrarToast('⚠️ Permiso no concedido. Revisá ajustes del sitio.', 'error');
-			}
-		} catch (e) {
-			console.error('activarNotificaciones error:', e);
-			mostrarToast('⚠️ No se pudo activar notificaciones. Revisá permisos del navegador.', 'error');
-		}
-	  };
     }
   </script>
 </body>
