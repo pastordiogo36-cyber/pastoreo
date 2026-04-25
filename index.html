@@ -943,6 +943,17 @@
       return div.innerHTML;
     }
 
+    function getIniciales(nombre) {
+      return String(nombre || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(p => p[0])
+        .join('')
+        .substring(0, 2)
+        .toUpperCase();
+    }
+
     // Debounce function to limit execution frequency (performance optimization)
     function debounce(fn, delay) {
       let timeoutId;
