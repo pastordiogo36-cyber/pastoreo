@@ -3668,7 +3668,7 @@ async function cargarDatosPastor() {
 
 	  if ('serviceWorker' in navigator) {
 		try {
-			navigator.serviceWorker.register('./OneSignalSDKWorker.js');
+			navigator.serviceWorker.register('OneSignalSDKWorker.js');
 		} catch (e) {
 			console.error('No se pudo registrar el service worker:', e);
 		}
@@ -3680,13 +3680,13 @@ async function cargarDatosPastor() {
 		OneSignalDeferred.push(async function (OneSignal) {
 			await OneSignal.init({
 				appId: ONESIGNAL_APP_ID,
-				serviceWorkerPath: './OneSignalSDKWorker.js',
-				serviceWorkerUpdaterPath: './OneSignalSDKUpdaterWorker.js'
+				serviceWorkerPath: 'OneSignalSDKWorker.js',
+				serviceWorkerUpdaterPath: 'OneSignalSDKUpdaterWorker.js'
 			});
 
 			try {
 				const perm = await OneSignal.Notifications.permission;
-				if (perm !== 'granted' && state.session && state.usuario) {
+				if (perm !== 'granted') {
 					await OneSignal.Notifications.requestPermission();
 				}
 			} catch (e) {
