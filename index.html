@@ -16,6 +16,7 @@
     rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
   <style>
     /* ===== TODOS LOS ESTILOS EXISTENTES SE MANTIENEN ===== */
     :root {
@@ -3667,10 +3668,31 @@ async function cargarDatosPastor() {
 
 	  if ('serviceWorker' in navigator) {
 		try {
-			navigator.serviceWorker.register('./service-worker.js');
+			navigator.serviceWorker.register('./OneSignalSDKWorker.js');
 		} catch (e) {
 			console.error('No se pudo registrar el service worker:', e);
 		}
+	  }
+
+	  const ONESIGNAL_APP_ID = '118093bb-70fa-4c85-be91-e4d75404c283';
+	  if (ONESIGNAL_APP_ID) {
+		window.OneSignalDeferred = window.OneSignalDeferred || [];
+		OneSignalDeferred.push(async function (OneSignal) {
+			await OneSignal.init({
+				appId: ONESIGNAL_APP_ID,
+				serviceWorkerPath: './OneSignalSDKWorker.js',
+				serviceWorkerUpdaterPath: './OneSignalSDKUpdaterWorker.js'
+			});
+
+			try {
+				const perm = await OneSignal.Notifications.permission;
+				if (perm !== 'granted' && state.session && state.usuario) {
+					await OneSignal.Notifications.requestPermission();
+				}
+			} catch (e) {
+				console.error('Error al solicitar permiso de notificaciones:', e);
+			}
+		});
 	  }
     }
   </script>
