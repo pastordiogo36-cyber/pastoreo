@@ -3668,7 +3668,8 @@ async function cargarDatosPastor() {
 
 	  if ('serviceWorker' in navigator) {
 		try {
-			navigator.serviceWorker.register('OneSignalSDKWorker.js');
+			const scopeBase = location.pathname.endsWith('/') ? location.pathname : location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
+			navigator.serviceWorker.register('OneSignalSDKWorker.js', { scope: scopeBase });
 		} catch (e) {
 			console.error('No se pudo registrar el service worker:', e);
 		}
@@ -3678,10 +3679,12 @@ async function cargarDatosPastor() {
 	  if (ONESIGNAL_APP_ID) {
 		window.OneSignalDeferred = window.OneSignalDeferred || [];
 		OneSignalDeferred.push(async function (OneSignal) {
+			const scopeBase = location.pathname.endsWith('/') ? location.pathname : location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
 			await OneSignal.init({
 				appId: ONESIGNAL_APP_ID,
 				serviceWorkerPath: 'OneSignalSDKWorker.js',
 				serviceWorkerUpdaterPath: 'OneSignalSDKUpdaterWorker.js',
+				serviceWorkerParam: { scope: scopeBase },
 				notifyButton: {
 					enable: true
 				}
@@ -3691,6 +3694,14 @@ async function cargarDatosPastor() {
 				await OneSignal.User?.PushSubscription?.optIn?.();
 			} catch (e) {
 				console.error('Error al hacer opt-in en OneSignal:', e);
+			}
+
+			try {
+				const osId = await OneSignal.User?.onesignalId;
+				const pushId = await OneSignal.User?.PushSubscription?.id;
+				console.log('OneSignal:', { osId, pushId, scopeBase });
+			} catch (e) {
+				console.error('Diagnóstico OneSignal error:', e);
 			}
 
 			try {
