@@ -1069,24 +1069,24 @@
 
       try {
         if (pantallaAnterior === 'asistencia' && pantalla !== 'asistencia') {
-          await withTimeout(guardarAsistencias(), 12000, 'guardar asistencias');
+          await withTimeout(guardarAsistencias(), 20000, 'guardar asistencias');
         }
 
         if (pantalla === 'asistencia') {
-          await withTimeout(cargarCongregantes(), 12000, 'cargar congregantes');
+          await withTimeout(cargarCongregantes(), 20000, 'cargar congregantes');
           const cache = state.asistenciasPorServicio?.[state.servicioActivo];
           if (cache && Object.keys(cache).length > 0) {
             state.asistenciasHoy = { ...cache };
           } else {
-            await withTimeout(cargarAsistenciasHoy(), 12000, 'cargar asistencias');
+            await withTimeout(cargarAsistenciasHoy(), 20000, 'cargar asistencias');
           }
         }
 
         if (pantalla === 'home') {
-          if (state.usuario?.rol === 'pastor') await withTimeout(cargarDatosPastor(), 12000, 'cargar datos pastor');
-          if (state.usuario?.rol === 'nangareko') await withTimeout(cargarDatosNangareko(), 12000, 'cargar datos ñangareko');
-          if (state.usuario?.rol === 'lider_dc') await withTimeout(cargarDatosLiderDC(), 12000, 'cargar datos líder dc');
-          if (state.usuario?.rol === 'hory') await withTimeout(cargarStatsHory(), 12000, 'cargar stats hory');
+          if (state.usuario?.rol === 'pastor') await withTimeout(cargarDatosPastor(), 20000, 'cargar datos pastor');
+          if (state.usuario?.rol === 'nangareko') await withTimeout(cargarDatosNangareko(), 20000, 'cargar datos ñangareko');
+          if (state.usuario?.rol === 'lider_dc') await withTimeout(cargarDatosLiderDC(), 20000, 'cargar datos líder dc');
+          if (state.usuario?.rol === 'hory') await withTimeout(cargarStatsHory(), 20000, 'cargar stats hory');
         }
 
         if (pantalla === 'lider-dc-asistencia') {
@@ -1094,7 +1094,12 @@
         }
       } catch (e) {
         console.error('Error al cambiar de pantalla:', e);
-        mostrarToast('⚠️ Ocurrió un error o la conexión está lenta. Probá de nuevo.', 'error');
+        const detalle = String(e?.message || '');
+        if (detalle.startsWith('Timeout:')) {
+          mostrarToast('⚠️ La operación tardó demasiado. ' + detalle.replace('Timeout: ', ''), 'error');
+        } else {
+          mostrarToast('⚠️ Ocurrió un error o la conexión está lenta. Probá de nuevo.', 'error');
+        }
       } finally {
         navigationInFlight = false;
         render();
@@ -1299,6 +1304,7 @@
       if (state.pantalla === 'nuevo-ingreso') return renderNuevoIngreso();
       // Pastor sub-pantallas
       if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
+      if (state.pantalla === 'pastor-lider-detalle') return renderPastorLiderDetalle();
       if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
       if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
       if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
@@ -1425,7 +1431,7 @@ async function cargarDatosPastor() {
       gruposRes
     ] = await Promise.all([
       sb.from('congregantes').select('*'),
-      sb.from('usuarios').select('id, nombre, email, rol').order('nombre', { ascending: true }),
+      sb.from('usuarios').select('*').order('nombre', { ascending: true }),
       sb.from('congregantes').select('id', { count: 'exact' }).gte('created_at', fechaStr),
       sb.from('asistencias').select('presente').eq('tipo_servicio', 'domingo').gte('fecha', fechaStr),
       sb.from('asistencias').select('presente').eq('tipo_servicio', 'miercoles').gte('fecha', fechaStr),
@@ -1536,6 +1542,41 @@ async function cargarDatosPastor() {
         { value: 'lider_dc', label: 'Líder DC' }
       ];
 
+      const porRol = {
+        pastor: usuarios.filter(u => u.rol === 'pastor'),
+        hory: usuarios.filter(u => u.rol === 'hory'),
+        nangareko: usuarios.filter(u => u.rol === 'nangareko'),
+        lider_dc: usuarios.filter(u => u.rol === 'lider_dc')
+      };
+
+      function renderLista(titulo, lista) {
+        return `
+        <div class="info-section" style="margin-bottom:12px">
+          <h3 style="margin:0 0 12px 0">${titulo} <span style="font-size:12px;color:var(--texto-suave)">(${lista.length})</span></h3>
+          ${lista.length === 0 ?
+            `<div class="info-row"><span class="label">Sin registros</span></div>` :
+            lista.map(u => {
+              const iniciales = getIniciales(u.nombre || '');
+              return `
+              <div style="padding:10px 0;border-top:1px solid rgba(255,255,255,0.06)">
+                <div class="info-row" style="align-items:center">
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div class="congregante-foto" style="width:38px;height:38px">${u.foto_url ? `<img src="${sanitizar(u.foto_url)}" />` : sanitizar(iniciales || '?')}</div>
+                    <div>
+                      <div class="label" style="cursor:pointer" onclick="verDetalleLider('${u.id}')">${sanitizar(u.nombre || '(Sin nombre)')}</div>
+                      <div style="font-size:12px;color:var(--texto-suave)">${sanitizar(u.email || '')}</div>
+                    </div>
+                  </div>
+                  <select style="width:160px" onchange="actualizarRolUsuario('${u.id}', this.value)">
+                    ${roles.map(r => `<option value="${r.value}" ${u.rol === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
+                  </select>
+                </div>
+              </div>`;
+            }).join('')
+          }
+        </div>`;
+      }
+
       return `
       <div class="main-content">
         <div class="section-header">
@@ -1543,33 +1584,71 @@ async function cargarDatosPastor() {
           <button class="btn-back" onclick="cambiarPantalla('home')">← Volver</button>
         </div>
 
+        <button class="btn-primary" style="margin-bottom:16px" onclick="pastorAgregarLider()">➕ Agregar líder</button>
+
         ${usuarios.length === 0 ?
           `<div class="coming-soon">
             <div class="big-icon">👥</div>
             <h3>No hay usuarios visibles</h3>
             <p>Si esto no es correcto, revisá permisos/RLS de la tabla usuarios</p>
           </div>` :
-          usuarios.map(u => `
-            <div class="info-section" style="margin-bottom:12px">
-              <div class="info-row">
-                <span class="label">${sanitizar(u.nombre || '(Sin nombre)')}</span>
-                <span style="font-size:12px;color:var(--texto-suave)">${sanitizar(u.email || '')}</span>
-              </div>
-              <div class="info-row">
-                <span class="label">Rol</span>
-                <select style="width:200px" onchange="actualizarRolUsuario('${u.id}', this.value)">
-                  ${roles.map(r => `<option value="${r.value}" ${u.rol === r.value ? 'selected' : ''}>${r.label}</option>`).join('')}
-                </select>
-              </div>
-            </div>
-          `).join('')
+          (
+            renderLista('Horys', porRol.hory) +
+            renderLista('Ñangarekos', porRol.nangareko) +
+            renderLista('Líderes de DC', porRol.lider_dc) +
+            renderLista('Pastor', porRol.pastor)
+          )
         }
       </div>
     `;
     }
 
+    function renderPastorLiderDetalle() {
+      const usuarioId = state.pastorLiderSeleccionadoId;
+      const u = (state.lideres || []).find(x => x.id === usuarioId);
+      if (!u) {
+        return `
+        <div class="main-content">
+          <div class="section-header">
+            <h3>👤 Líder</h3>
+            <button class="btn-back" onclick="cambiarPantalla('pastor-lideres')">← Volver</button>
+          </div>
+          <div class="coming-soon">
+            <div class="big-icon">👤</div>
+            <h3>No encontrado</h3>
+          </div>
+        </div>`;
+      }
+
+      return `
+      <div class="main-content">
+        <div class="section-header">
+          <h3>👤 Perfil del líder</h3>
+          <button class="btn-back" onclick="cambiarPantalla('pastor-lideres')">← Volver</button>
+        </div>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <div style="display:flex;gap:12px;align-items:center">
+            <div class="congregante-foto" style="width:56px;height:56px">${u.foto_url ? `<img src="${sanitizar(u.foto_url)}" />` : sanitizar(getIniciales(u.nombre || '') || '?')}</div>
+            <div>
+              <div style="font-size:16px;font-weight:700">${sanitizar(u.nombre || '(Sin nombre)')}</div>
+              <div style="font-size:12px;color:var(--texto-suave)">${sanitizar(u.email || '')}</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <h3>Datos</h3>
+          <div class="info-row"><span class="label">Teléfono</span><span>${sanitizar(u.telefono || '—')}</span></div>
+          <div class="info-row"><span class="label">Estado</span><span>${sanitizar(u.estado || '—')}</span></div>
+          <div class="info-row"><span class="label">Rol</span><span>${sanitizar(u.rol || '—')}</span></div>
+        </div>
+      </div>`;
+    }
+
     function renderPastorCongregacion() {
       const grupos = state.gruposDC || [];
+      const nangarekos = (state.lideres || []).filter(u => u.rol === 'nangareko');
       const estadoOpciones = [
         { value: 'nuevo', label: estadoLabel('nuevo') },
         { value: 'visita', label: estadoLabel('visita') },
@@ -1602,10 +1681,15 @@ async function cargarDatosPastor() {
           `<div style="text-align:center;color:var(--texto-suave);padding:32px;font-size:14px">No se encontraron resultados.</div>` :
           lista.map(c => {
             const grupoActual = c.grupo_dc_id ? grupos.find(g => g.id === c.grupo_dc_id) : null;
+            const nangareko = c.nangareko_id ? nangarekos.find(n => n.id === c.nangareko_id) : null;
+            const iniciales = (c.nombre || '').split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
             return `
               <div class="info-section" style="margin-bottom:12px">
                 <div class="info-row">
-                  <span class="label">${sanitizar(c.nombre)}</span>
+                  <div style="display:flex;align-items:center;gap:10px">
+                    <div class="congregante-foto" style="width:38px;height:38px">${c.foto_url ? `<img src="${sanitizar(c.foto_url)}" />` : sanitizar(iniciales || '?')}</div>
+                    <span class="label">${sanitizar(c.nombre)}</span>
+                  </div>
                   <span class="estado-${c.estado}">${estadoLabel(c.estado)}</span>
                 </div>
 
@@ -1622,6 +1706,11 @@ async function cargarDatosPastor() {
                     <option value="">(Sin grupo)</option>
                     ${grupos.map(g => `<option value="${g.id}" ${c.grupo_dc_id === g.id ? 'selected' : ''}>${sanitizar(g.nombre)}</option>`).join('')}
                   </select>
+                </div>
+
+                <div class="info-row">
+                  <span class="label">Ñangareko</span>
+                  <span>${nangareko ? sanitizar(nangareko.nombre) : '—'}</span>
                 </div>
 
                 <div class="info-row">
@@ -1692,15 +1781,15 @@ async function cargarDatosPastor() {
       let lideres = state.lideres || [];
       lideres = lideres.filter(l => {
         const rol = String(l.rol || '').toLowerCase();
-        return rol === 'lider_dc' || rol === 'liderdc' || rol === 'lider dc';
+        return rol === 'lider_dc' || rol === 'liderdc' || rol === 'lider dc' || rol === 'nangareko';
       });
 
       // Si todavía no hay, recargar desde DB (puede que state.lideres esté vacío/stale)
       if (lideres.length === 0) {
         try {
           const { data, error } = await withTimeout(
-            sb.from('usuarios').select('id, nombre, email, rol').eq('rol', 'lider_dc').order('nombre', { ascending: true }),
-            12000,
+            sb.from('usuarios').select('id, nombre, email, rol').in('rol', ['lider_dc', 'nangareko']).order('nombre', { ascending: true }),
+            20000,
             'cargar líderes dc'
           );
           if (error) throw error;
@@ -1744,6 +1833,43 @@ async function cargarDatosPastor() {
         await cargarCongregantes();
         await cargarDatosPastor();
         asignarMiembrosGrupo(grupoId, grupoNombre);
+      }
+    };
+
+    window.verDetalleLider = function (usuarioId) {
+      state.pastorLiderSeleccionadoId = usuarioId;
+      cambiarPantalla('pastor-lider-detalle');
+    };
+
+    window.pastorAgregarLider = async function () {
+      const email = (prompt('Email del líder (debe tener cuenta creada):') || '').trim();
+      if (!email) return;
+      const rol = (prompt('Rol a asignar (hory / nangareko / lider_dc):') || '').trim();
+      if (!rol) return;
+
+      try {
+        const { data, error } = await withTimeout(
+          sb.from('usuarios').select('*').eq('email', email).maybeSingle(),
+          20000,
+          'buscar líder por email'
+        );
+        if (error) throw error;
+        if (!data) {
+          mostrarToast('⚠️ No existe un usuario con ese email. Esa persona debe registrarse primero.', 'error');
+          return;
+        }
+        const { error: upErr } = await withTimeout(
+          sb.from('usuarios').update({ rol }).eq('id', data.id),
+          20000,
+          'actualizar rol'
+        );
+        if (upErr) throw upErr;
+        mostrarToast('✅ Líder actualizado');
+        await cargarDatosPastor();
+        render();
+      } catch (e) {
+        console.error('Error al agregar líder:', e);
+        mostrarToast('⚠️ No se pudo agregar/actualizar el líder: ' + (e?.message || 'sin detalle'), 'error');
       }
     };
 
@@ -2975,7 +3101,7 @@ async function cargarDatosPastor() {
 
       try {
         // Guardar antes de cambiar, para no perder el trabajo si el Hory navega entre servicios
-        await withTimeout(guardarAsistencias(), 12000, 'guardar asistencias');
+        await withTimeout(guardarAsistencias(), 20000, 'guardar asistencias');
 
         state.servicioActivo = servicio;
 
@@ -2984,7 +3110,7 @@ async function cargarDatosPastor() {
         if (cache && Object.keys(cache).length > 0) {
           state.asistenciasHoy = { ...cache };
         } else {
-          await withTimeout(cargarAsistenciasHoy(), 12000, 'cargar asistencias');
+          await withTimeout(cargarAsistenciasHoy(), 20000, 'cargar asistencias');
         }
 
         render();
@@ -2995,7 +3121,12 @@ async function cargarDatosPastor() {
         if (activeBtn) activeBtn.classList.add('active');
       } catch (e) {
         console.error('Error al cambiar servicio:', e);
-        mostrarToast('⚠️ Error al cambiar servicio. Probá de nuevo.', 'error');
+        const detalle = String(e?.message || '');
+        if (detalle.startsWith('Timeout:')) {
+          mostrarToast('⚠️ La operación tardó demasiado. ' + detalle.replace('Timeout: ', ''), 'error');
+        } else {
+          mostrarToast('⚠️ Error al cambiar servicio. Probá de nuevo.', 'error');
+        }
       } finally {
         serviceChangeInFlight = false;
       }
