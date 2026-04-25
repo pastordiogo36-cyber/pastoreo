@@ -905,6 +905,10 @@
       ultimosCongregantes: [],
       alertasRecientes: [],
       gruposDC: [],
+      pastorLiderSeleccionadoId: null,
+      pastorFichaTarget: null,
+      pastorFichasLider: [],
+      pastorFichasCongregante: [],
       // Ñangareko
       misCuidados: [],
       alertasNuevos: [],
@@ -1305,7 +1309,9 @@
       // Pastor sub-pantallas
       if (state.pantalla === 'pastor-lideres') return renderPastorLideres();
       if (state.pantalla === 'pastor-lider-detalle') return renderPastorLiderDetalle();
+      if (state.pantalla === 'pastor-lider-fichas') return renderPastorLiderFichas();
       if (state.pantalla === 'pastor-congregacion') return renderPastorCongregacion();
+      if (state.pantalla === 'pastor-congregante-fichas') return renderPastorCongreganteFichas();
       if (state.pantalla === 'pastor-calendario') return renderPastorCalendario();
       if (state.pantalla === 'pastor-alertas') return renderPastorAlertas();
       if (state.pantalla === 'pastor-grupos') return renderPastorGrupos();
@@ -1643,6 +1649,22 @@ async function cargarDatosPastor() {
           <div class="info-row"><span class="label">Estado</span><span>${sanitizar(u.estado || '—')}</span></div>
           <div class="info-row"><span class="label">Rol</span><span>${sanitizar(u.rol || '—')}</span></div>
         </div>
+
+        <div class="info-section" style="margin-bottom:12px">
+          <h3>Ficha del pastor</h3>
+          <button class="btn-primary" style="margin-top:0" onclick="abrirFichaPastorLider('${sanitizar(u.id)}','${sanitizar(u.nombre || '')}')">📝 Registrar contacto</button>
+          <div style="margin-top:12px">
+            ${(state.pastorFichasLider || []).length === 0 ?
+              '<div class="info-row"><span class="label">Sin contactos registrados</span></div>' :
+              (state.pastorFichasLider || []).slice(0, 5).map(f => `
+                <div class="info-row">
+                  <span class="label">${sanitizar(f.tipo_contacto || 'contacto')}</span>
+                  <span style="font-size:12px;color:var(--texto-suave)">${new Date(f.created_at).toLocaleDateString()}</span>
+                </div>
+              `).join('')
+            }
+          </div>
+        </div>
       </div>`;
     }
 
@@ -1717,11 +1739,120 @@ async function cargarDatosPastor() {
                   <span class="label">Asignado</span>
                   <span>${grupoActual ? sanitizar(grupoActual.nombre) : '—'}</span>
                 </div>
+
+                <div style="display:flex; gap:8px; margin-top:12px">
+                  <button class="btn-primary" style="flex:1; padding:10px" onclick="abrirFichaPastorCongregante('${c.id}','${sanitizar(c.nombre || '')}')">📝 Registrar contacto</button>
+                  <button class="btn-primary" style="flex:1; padding:10px; background:var(--gris-medio)" onclick="verHistorialFichasPastorCongregante('${c.id}','${sanitizar(c.nombre || '')}')">📜 Historial</button>
+                </div>
               </div>`;
           }).join('')
         }
       </div>
     `;
+    }
+
+    function renderPastorLiderFichas() {
+      const t = state.pastorFichaTarget;
+      if (!t || t.tipo !== 'lider') {
+        return `<div class="main-content"><div class="section-header"><h3>📋 Ficha</h3><button class="btn-back" onclick="cambiarPantalla('pastor-lideres')">← Volver</button></div></div>`;
+      }
+
+      return `
+      <div class="main-content">
+        <div class="section-header">
+          <h3>📋 Contacto con: ${sanitizar(t.nombre || '')}</h3>
+          <button class="btn-back" onclick="cambiarPantalla('pastor-lider-detalle')">← Volver</button>
+        </div>
+        <div class="nuevo-form">
+          <div class="input-group">
+            <label>Tipo de contacto</label>
+            <select id="pastor-ficha-tipo">
+              <option value="whatsapp">💬 WhatsApp</option>
+              <option value="llamada">📞 Llamada</option>
+              <option value="visita">🏠 Visita personal</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Versículo compartido (opcional)</label>
+            <input type="text" id="pastor-ficha-versiculo" placeholder="Ej: Salmo 23:1" />
+          </div>
+          <div class="input-group">
+            <label>Estado de ánimo</label>
+            <select id="pastor-ficha-animo">
+              <option value="muy_bien">😊 Muy bien</option>
+              <option value="animado">🙂 Animado</option>
+              <option value="desanimado">😐 Desanimado</option>
+              <option value="decaido">😔 Decaído</option>
+              <option value="con_miedo">😨 Con miedo</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Motivo de oración</label>
+            <textarea id="pastor-ficha-oracion" rows="2" style="width:100%; background:var(--gris-medio); border:none; border-radius:8px; padding:12px; color:white"></textarea>
+          </div>
+          <div class="input-group">
+            <label>Notas adicionales</label>
+            <textarea id="pastor-ficha-notas" rows="2" style="width:100%; background:var(--gris-medio); border:none; border-radius:8px; padding:12px; color:white"></textarea>
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:20px">
+            <input type="checkbox" id="pastor-ficha-por-ausencia" />
+            <span style="font-size:13px">⚠️ Este contacto es porque faltó a algún servicio</span>
+          </label>
+          <button class="btn-primary" onclick="guardarFichaPastorLider()">✅ Guardar contacto</button>
+        </div>
+      </div>`;
+    }
+
+    function renderPastorCongreganteFichas() {
+      const t = state.pastorFichaTarget;
+      if (!t || t.tipo !== 'congregante') {
+        return `<div class="main-content"><div class="section-header"><h3>📋 Ficha</h3><button class="btn-back" onclick="cambiarPantalla('pastor-congregacion')">← Volver</button></div></div>`;
+      }
+
+      return `
+      <div class="main-content">
+        <div class="section-header">
+          <h3>📋 Contacto con: ${sanitizar(t.nombre || '')}</h3>
+          <button class="btn-back" onclick="cambiarPantalla('pastor-congregacion')">← Volver</button>
+        </div>
+        <div class="nuevo-form">
+          <div class="input-group">
+            <label>Tipo de contacto</label>
+            <select id="pastor-cong-ficha-tipo">
+              <option value="whatsapp">💬 WhatsApp</option>
+              <option value="llamada">📞 Llamada</option>
+              <option value="visita">🏠 Visita personal</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Versículo compartido (opcional)</label>
+            <input type="text" id="pastor-cong-ficha-versiculo" placeholder="Ej: Salmo 23:1" />
+          </div>
+          <div class="input-group">
+            <label>Estado de ánimo</label>
+            <select id="pastor-cong-ficha-animo">
+              <option value="muy_bien">😊 Muy bien</option>
+              <option value="animado">🙂 Animado</option>
+              <option value="desanimado">😐 Desanimado</option>
+              <option value="decaido">😔 Decaído</option>
+              <option value="con_miedo">😨 Con miedo</option>
+            </select>
+          </div>
+          <div class="input-group">
+            <label>Motivo de oración</label>
+            <textarea id="pastor-cong-ficha-oracion" rows="2" style="width:100%; background:var(--gris-medio); border:none; border-radius:8px; padding:12px; color:white"></textarea>
+          </div>
+          <div class="input-group">
+            <label>Notas adicionales</label>
+            <textarea id="pastor-cong-ficha-notas" rows="2" style="width:100%; background:var(--gris-medio); border:none; border-radius:8px; padding:12px; color:white"></textarea>
+          </div>
+          <label style="display:flex; align-items:center; gap:8px; margin-bottom:20px">
+            <input type="checkbox" id="pastor-cong-ficha-por-ausencia" />
+            <span style="font-size:13px">⚠️ Este contacto es porque faltó a algún servicio</span>
+          </label>
+          <button class="btn-primary" onclick="guardarFichaPastorCongregante()">✅ Guardar contacto</button>
+        </div>
+      </div>`;
     }
 
     function renderPastorGrupos() {
@@ -1838,7 +1969,9 @@ async function cargarDatosPastor() {
 
     window.verDetalleLider = function (usuarioId) {
       state.pastorLiderSeleccionadoId = usuarioId;
+      state.pastorFichasLider = [];
       cambiarPantalla('pastor-lider-detalle');
+      abrirFichaPastorLider(usuarioId, ((state.lideres || []).find(u => u.id === usuarioId)?.nombre || ''));
     };
 
     window.pastorAgregarLider = async function () {
@@ -1870,6 +2003,117 @@ async function cargarDatosPastor() {
       } catch (e) {
         console.error('Error al agregar líder:', e);
         mostrarToast('⚠️ No se pudo agregar/actualizar el líder: ' + (e?.message || 'sin detalle'), 'error');
+      }
+    };
+
+    window.abrirFichaPastorLider = async function (liderId, liderNombre) {
+      state.pastorFichaTarget = { tipo: 'lider', id: liderId, nombre: liderNombre };
+      try {
+        const { data, error } = await withTimeout(
+          sb.from('fichas_pastor').select('*').eq('lider_id', liderId).order('created_at', { ascending: false }).limit(10),
+          20000,
+          'cargar fichas pastor'
+        );
+        if (error) throw error;
+        state.pastorFichasLider = data || [];
+      } catch (e) {
+        console.error('Error al cargar fichas_pastor:', e);
+        state.pastorFichasLider = [];
+      }
+      cambiarPantalla('pastor-lider-fichas');
+    };
+
+    window.guardarFichaPastorLider = async function () {
+      const t = state.pastorFichaTarget;
+      if (!t || t.tipo !== 'lider') return;
+      const tipo = document.getElementById('pastor-ficha-tipo')?.value;
+      const versiculo = document.getElementById('pastor-ficha-versiculo')?.value;
+      const estadoAnimo = document.getElementById('pastor-ficha-animo')?.value;
+      const motivoOracion = document.getElementById('pastor-ficha-oracion')?.value;
+      const notas = document.getElementById('pastor-ficha-notas')?.value;
+      const esPorAusencia = document.getElementById('pastor-ficha-por-ausencia')?.checked || false;
+
+      try {
+        const { error } = await withTimeout(
+          sb.from('fichas_pastor').insert({
+            lider_id: t.id,
+            pastor_id: state.usuario.id,
+            tipo_contacto: tipo,
+            versiculo_compartido: versiculo || null,
+            estado_animo: estadoAnimo,
+            motivo_oracion: motivoOracion || null,
+            notas_adicionales: notas || null,
+            es_por_ausencia: esPorAusencia
+          }),
+          20000,
+          'guardar ficha pastor'
+        );
+        if (error) throw error;
+        mostrarToast('✅ Contacto registrado correctamente');
+        await abrirFichaPastorLider(t.id, t.nombre);
+      } catch (e) {
+        console.error('Error al guardar ficha pastor líder:', e);
+        mostrarToast('⚠️ No se pudo guardar: ' + (e?.message || 'sin detalle'), 'error');
+      }
+    };
+
+    window.abrirFichaPastorCongregante = function (congreganteId, congreganteNombre) {
+      state.pastorFichaTarget = { tipo: 'congregante', id: congreganteId, nombre: congreganteNombre };
+      cambiarPantalla('pastor-congregante-fichas');
+    };
+
+    window.guardarFichaPastorCongregante = async function () {
+      const t = state.pastorFichaTarget;
+      if (!t || t.tipo !== 'congregante') return;
+      const tipo = document.getElementById('pastor-cong-ficha-tipo')?.value;
+      const versiculo = document.getElementById('pastor-cong-ficha-versiculo')?.value;
+      const estadoAnimo = document.getElementById('pastor-cong-ficha-animo')?.value;
+      const motivoOracion = document.getElementById('pastor-cong-ficha-oracion')?.value;
+      const notas = document.getElementById('pastor-cong-ficha-notas')?.value;
+      const esPorAusencia = document.getElementById('pastor-cong-ficha-por-ausencia')?.checked || false;
+
+      try {
+        const { error } = await withTimeout(
+          sb.from('fichas_pastor_congregantes').insert({
+            congregante_id: t.id,
+            pastor_id: state.usuario.id,
+            tipo_contacto: tipo,
+            versiculo_compartido: versiculo || null,
+            estado_animo: estadoAnimo,
+            motivo_oracion: motivoOracion || null,
+            notas_adicionales: notas || null,
+            es_por_ausencia: esPorAusencia
+          }),
+          20000,
+          'guardar ficha pastor congregante'
+        );
+        if (error) throw error;
+        mostrarToast('✅ Contacto registrado correctamente');
+        state.pastorFichaTarget = null;
+        cambiarPantalla('pastor-congregacion');
+      } catch (e) {
+        console.error('Error al guardar ficha pastor congregante:', e);
+        mostrarToast('⚠️ No se pudo guardar: ' + (e?.message || 'sin detalle'), 'error');
+      }
+    };
+
+    window.verHistorialFichasPastorCongregante = async function (congreganteId, congreganteNombre) {
+      try {
+        const { data, error } = await withTimeout(
+          sb.from('fichas_pastor_congregantes').select('*').eq('congregante_id', congreganteId).order('created_at', { ascending: false }).limit(5),
+          20000,
+          'cargar historial fichas pastor congregante'
+        );
+        if (error) throw error;
+        if (!data || data.length === 0) {
+          mostrarToast(`📭 ${congreganteNombre} - No hay contactos registrados aún`);
+          return;
+        }
+        const resumen = data.map(f => `📅 ${new Date(f.created_at).toLocaleDateString()}: ${f.tipo_contacto || 'contacto'}`).join('\n');
+        alert(`📜 Historial de ${congreganteNombre}:\n\n${resumen}`);
+      } catch (e) {
+        console.error('Error al cargar historial fichas pastor congregante:', e);
+        mostrarToast('⚠️ No se pudo cargar el historial: ' + (e?.message || 'sin detalle'), 'error');
       }
     };
 
