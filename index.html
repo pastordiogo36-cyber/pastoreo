@@ -1072,15 +1072,20 @@
     }
 
     window.cambiarPantalla = async function (pantalla) {
-      // Navegación no-bloqueante: renderiza de inmediato y carga datos en segundo plano.
-      // Esto evita que un request colgado deje la app "con botones muertos".
       if (navigationInFlight) return;
       navigationInFlight = true;
+      const watchdog = setTimeout(() => {
+        if (navigationInFlight) {
+          navigationInFlight = false;
+          mostrarToast('⚠️ La operación tardó demasiado. Probá de nuevo.', 'error');
+          try { render(); } catch (e) { console.error('Error al renderizar:', e); }
+        }
+      }, 25000);
 
       const pantallaAnterior = state.pantalla;
       state.pantalla = pantalla;
       state.busqueda = '';
-      render();
+      try { render(); } catch (e) { console.error('Error al renderizar:', e); }
 
       try {
         if (pantallaAnterior === 'asistencia' && pantalla !== 'asistencia') {
@@ -1116,8 +1121,9 @@
           mostrarToast('⚠️ Ocurrió un error o la conexión está lenta. Probá de nuevo.', 'error');
         }
       } finally {
+        clearTimeout(watchdog);
         navigationInFlight = false;
-        render();
+        try { render(); } catch (e) { console.error('Error al renderizar:', e); }
       }
     };
 
@@ -1744,11 +1750,6 @@ async function cargarDatosPastor() {
                 <div class="info-row">
                   <span class="label">Ñangareko</span>
                   <span>${nangareko ? sanitizar(nangareko.nombre) : '—'}</span>
-                </div>
-
-                <div class="info-row">
-                  <span class="label">Asignado</span>
-                  <span>${grupoActual ? sanitizar(grupoActual.nombre) : '—'}</span>
                 </div>
 
                 <div style="display:flex; gap:8px; margin-top:12px">
