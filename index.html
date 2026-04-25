@@ -3666,10 +3666,14 @@ async function cargarDatosPastor() {
         render();
       });
 
+	  const ONESIGNAL_BASE_PATH = (() => {
+		const seg = String(location.pathname || '/').split('/').filter(Boolean)[0];
+		return seg ? `/${seg}/` : '/';
+	  })();
+
 	  if ('serviceWorker' in navigator) {
 		try {
-			const scopeBase = location.pathname.endsWith('/') ? location.pathname : location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
-			navigator.serviceWorker.register('OneSignalSDKWorker.js', { scope: scopeBase });
+			navigator.serviceWorker.register(`${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`, { scope: ONESIGNAL_BASE_PATH });
 		} catch (e) {
 			console.error('No se pudo registrar el service worker:', e);
 		}
@@ -3679,11 +3683,11 @@ async function cargarDatosPastor() {
 	  if (ONESIGNAL_APP_ID) {
 		window.OneSignalDeferred = window.OneSignalDeferred || [];
 		OneSignalDeferred.push(async function (OneSignal) {
-			const scopeBase = location.pathname.endsWith('/') ? location.pathname : location.pathname.substring(0, location.pathname.lastIndexOf('/') + 1);
+			const scopeBase = ONESIGNAL_BASE_PATH;
 			await OneSignal.init({
 				appId: ONESIGNAL_APP_ID,
-				serviceWorkerPath: 'OneSignalSDKWorker.js',
-				serviceWorkerUpdaterPath: 'OneSignalSDKUpdaterWorker.js',
+				serviceWorkerPath: `${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`,
+				serviceWorkerUpdaterPath: `${ONESIGNAL_BASE_PATH}OneSignalSDKUpdaterWorker.js`,
 				serviceWorkerParam: { scope: scopeBase },
 				notifyButton: {
 					enable: true
