@@ -3669,7 +3669,7 @@ async function cargarDatosPastor() {
 	  const ONESIGNAL_BASE_PATH = '/pastoreo/';
 
 	  if ('serviceWorker' in navigator) {
-		(async () => {
+		window.__onesignalSwRegistrationPromise = (async () => {
 			try {
 				const regs = await navigator.serviceWorker.getRegistrations();
 				for (const reg of regs) {
@@ -3680,8 +3680,10 @@ async function cargarDatosPastor() {
 					`${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`,
 					{ scope: ONESIGNAL_BASE_PATH }
 				);
+				return window.__onesignalSwRegistration;
 			} catch (e) {
 				console.error('No se pudo registrar el service worker:', e);
+				return null;
 			}
 		})();
 	  }
@@ -3693,7 +3695,7 @@ async function cargarDatosPastor() {
 			const scopeBase = ONESIGNAL_BASE_PATH;
 			let swReg = null;
 			try {
-				swReg = window.__onesignalSwRegistration || null;
+				swReg = await (window.__onesignalSwRegistrationPromise || Promise.resolve(window.__onesignalSwRegistration || null));
 				if (!swReg && 'serviceWorker' in navigator) {
 					swReg = await navigator.serviceWorker.getRegistration(scopeBase);
 				}
