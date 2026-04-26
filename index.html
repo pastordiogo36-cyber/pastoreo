@@ -3676,7 +3676,10 @@ async function cargarDatosPastor() {
 					try { await reg.unregister(); } catch (e) { /* noop */ }
 				}
 
-				await navigator.serviceWorker.register(`${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`, { scope: ONESIGNAL_BASE_PATH });
+				window.__onesignalSwRegistration = await navigator.serviceWorker.register(
+					`${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`,
+					{ scope: ONESIGNAL_BASE_PATH }
+				);
 			} catch (e) {
 				console.error('No se pudo registrar el service worker:', e);
 			}
@@ -3688,8 +3691,19 @@ async function cargarDatosPastor() {
 		window.OneSignalDeferred = window.OneSignalDeferred || [];
 		OneSignalDeferred.push(async function (OneSignal) {
 			const scopeBase = ONESIGNAL_BASE_PATH;
+			let swReg = null;
+			try {
+				swReg = window.__onesignalSwRegistration || null;
+				if (!swReg && 'serviceWorker' in navigator) {
+					swReg = await navigator.serviceWorker.getRegistration(scopeBase);
+				}
+			} catch (e) {
+				console.error('No se pudo obtener serviceWorkerRegistration:', e);
+			}
+
 			await OneSignal.init({
 				appId: ONESIGNAL_APP_ID,
+				serviceWorkerRegistration: swReg || undefined,
 				serviceWorkerPath: `${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`,
 				serviceWorkerUpdaterPath: `${ONESIGNAL_BASE_PATH}OneSignalSDKUpdaterWorker.js`,
 				serviceWorkerParam: { scope: scopeBase },
