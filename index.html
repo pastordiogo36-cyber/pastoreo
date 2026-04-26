@@ -3666,20 +3666,14 @@ async function cargarDatosPastor() {
         render();
       });
 
-	  const ONESIGNAL_BASE_PATH = (() => {
-		const seg = String(location.pathname || '/').split('/').filter(Boolean)[0];
-		return seg ? `/${seg}/` : '/';
-	  })();
+	  const ONESIGNAL_BASE_PATH = '/pastoreo/';
 
 	  if ('serviceWorker' in navigator) {
 		(async () => {
 			try {
 				const regs = await navigator.serviceWorker.getRegistrations();
 				for (const reg of regs) {
-					const url = reg?.active?.scriptURL || reg?.installing?.scriptURL || reg?.waiting?.scriptURL || '';
-					if (url.includes('service-worker.js') || url.endsWith('/OneSignalSDKWorker.js')) {
-						try { await reg.unregister(); } catch (e) { /* noop */ }
-					}
+					try { await reg.unregister(); } catch (e) { /* noop */ }
 				}
 
 				await navigator.serviceWorker.register(`${ONESIGNAL_BASE_PATH}OneSignalSDKWorker.js`, { scope: ONESIGNAL_BASE_PATH });
