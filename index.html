@@ -3671,6 +3671,18 @@ async function cargarDatosPastor() {
 	  if ('serviceWorker' in navigator) {
 		window.__onesignalSwRegistrationPromise = (async () => {
 			try {
+				// Si esta página está controlada por un SW viejo, puede interceptar la descarga del SW de OneSignal
+				// y devolver un 404 "fantasma". En ese caso, desregistramos todo y recargamos UNA sola vez.
+				if (navigator.serviceWorker.controller && !sessionStorage.getItem('sw_reset_done')) {
+					sessionStorage.setItem('sw_reset_done', '1');
+					const regs0 = await navigator.serviceWorker.getRegistrations();
+					for (const reg of regs0) {
+						try { await reg.unregister(); } catch (e) { /* noop */ }
+					}
+					setTimeout(() => location.reload(), 50);
+					return null;
+				}
+
 				const regs = await navigator.serviceWorker.getRegistrations();
 				for (const reg of regs) {
 					try { await reg.unregister(); } catch (e) { /* noop */ }
